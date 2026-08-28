@@ -127,15 +127,36 @@ def test_every_clock_validates_against_the_contract(client, schema):
                 "; ".join(f"{list(e.path)} {e.message}" for e in errors)
 
 
-def test_every_running_clock_carries_unverified_provenance(client):
+def test_every_running_clock_carries_complete_provenance(client):
     for session in ("sess_maria", "sess_daniel"):
         for c in clocks(client, session)["clocks"]:
             if not c["applicable"]:
                 continue
-            assert c["provenance"]["verified"] is False, \
-                "seeded rules must still render the warning band"
-            assert c["provenance"]["citation"]
-            assert c["provenance"]["source_url"].startswith("http")
+            p = c["provenance"]
+            assert p["citation"]
+            assert p["source_url"].startswith("http")
+            assert isinstance(p["verified"], bool)
+            if p["verified"]:
+                assert p["verified_by"], "verified with no signature is worse than unverified"
+
+
+def test_verification_is_atomic_and_exactly_one_rule_is_flagged():
+    """12 of 13 rules are signed off. lottery_selection is deliberately not.
+
+    The build spec cites it as "Final Rule 2025-12-29" with no Federal Register
+    number, and it powers the most quantitative screen in the product. Exactly one
+    flagged card is the thesis working; thirteen would read as unfinished.
+    See docs/REVIEW.md E1.
+    """
+    with repo.reference_tx() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT rule_key, effective_from, verified_by, verified_at FROM rules "
+            "WHERE verified_by IS NULL OR verified_at IS NULL")
+        unverified = cur.fetchall()
+    assert len(unverified) == 1, [r["rule_key"] for r in unverified]
+    assert unverified[0]["rule_key"] == "lottery_selection"
+    assert unverified[0]["verified_by"] is None
+    assert unverified[0]["verified_at"] is None      # the CHECK keeps these together
 
 
 def test_disclaimer_is_present_once(client):
@@ -258,7 +279,10 @@ def test_replay_writes_both_scenarios(client):
         cur.execute(
             "SELECT DISTINCT scenario_id FROM clock_evaluation_outbox WHERE as_of = %s "
             "ORDER BY scenario_id", (AS_OF,))
-        assert [r["scenario_id"] for r in cur.fetchall()] == ["actual", "rule:h1b_max_5y"]
+        seen = {r["scenario_id"] for r in cur.fetchall()}
+    # Subset, not equality: other scenarios may have been run against this database,
+    # and asserting the exact set makes the test order-dependent on other tests.
+    assert {"actual", "rule:h1b_max_5y"} <= seen
 
 
 def test_actual_is_a_reserved_scenario_id(client):

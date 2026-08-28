@@ -81,3 +81,34 @@ SELECT 'occupation_coverage' AS check,
        soc_code_norm, any(soc_title) AS title, count() AS filings
 FROM lca_filings WHERE case_status_norm = 'CERTIFIED'
 GROUP BY soc_code_norm ORDER BY filings DESC LIMIT 8;
+
+-- 11. The rollup must agree with its source.
+--
+-- A materialized view's rows live in its own table, so TRUNCATE on clock_evaluations
+-- does NOT clear risk_rollup. Truncating the source alone left the rollup holding
+-- users who no longer existed, which in the operator view means reporting a
+-- population that is not there. Any row where agrees = 0 is a stale rollup: truncate
+-- risk_rollup and re-replicate from the Postgres outbox, which is the system of
+-- record.
+SELECT 'rollup_agrees_with_source' AS check,
+       countIf(agrees = 0) AS disagreements,
+       count()             AS groups_compared
+FROM (
+  SELECT r.users = s.users AS agrees
+  FROM (SELECT as_of, clock_key, scenario_id, severity, uniqMerge(users) AS users
+        FROM risk_rollup GROUP BY as_of, clock_key, scenario_id, severity) r
+  FULL JOIN (SELECT as_of, clock_key, scenario_id, severity, uniqExact(user_id) AS users
+             FROM clock_evaluations WHERE applicable = 1
+             GROUP BY as_of, clock_key, scenario_id, severity) s
+  USING (as_of, clock_key, scenario_id, severity)
+);
+
+-- 12. Replication lag. Rows in the Postgres outbox with replicated_at IS NULL have
+--     not reached ClickHouse. Run `python -m api.replicate`.
+SELECT 'evaluations_present' AS check,
+       count()                    AS rows,
+       uniqExact(user_id)         AS users,
+       uniqExact(scenario_id)     AS scenarios,
+       min(as_of)                 AS earliest,
+       max(as_of)                 AS latest
+FROM clock_evaluations;

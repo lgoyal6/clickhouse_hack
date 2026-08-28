@@ -6,7 +6,7 @@ SHELL := /bin/bash
 PG    := postgresql://postgres:$${POSTGRES_PASSWORD:-devonly}@localhost:5432/status_clock
 CH    := clickhouse client --host localhost --password $${CLICKHOUSE_PASSWORD:-devonly}
 
-.PHONY: help deps up down migrate seed ch-ddl fetch convert load corpus quality test itest api verify reset demo
+.PHONY: help deps up down migrate seed ch-ddl fetch convert load corpus quality replicate reset-evals test itest api verify reset demo
 
 help:
 	@grep -E '^[a-z-]+:.*?##' $(MAKEFILE_LIST) | sed 's/:.*##/\t/' | column -t -s $$'\t'
@@ -49,6 +49,17 @@ corpus:        ## fetch + convert + load two fiscal years, then gate
 	$(MAKE) -f Makefile.data fetch convert load FY=2024
 	$(MAKE) -f Makefile.data fetch convert load FY=2025
 	$(MAKE) -f Makefile.data quality
+
+replicate:     ## drain the Postgres outbox into ClickHouse (the CDC path)
+	python -m api.replicate
+
+reset-evals:   ## rebuild clock_evaluations AND its rollup from the outbox
+	@# Truncating clock_evaluations alone leaves risk_rollup holding rows whose
+	@# users no longer exist. A materialized view's data lives in its own table.
+	$(CH) --query "TRUNCATE TABLE clock_evaluations"
+	$(CH) --query "TRUNCATE TABLE risk_rollup"
+	psql "$(PG)" -q -c "UPDATE clock_evaluation_outbox SET replicated_at = NULL"
+	python -m api.replicate
 
 quality:       ## data quality gates. Must pass before trusting any corpus query.
 	$(CH) --multiquery < clickhouse/queries/data_quality.sql
