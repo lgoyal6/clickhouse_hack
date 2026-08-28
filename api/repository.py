@@ -180,3 +180,22 @@ def previous_evaluation(conn, clock_key: str, before: dt.date) -> dict | None:
             (clock_key, before),
         )
         return cur.fetchone()
+
+
+def current_employment(conn) -> dict | None:
+    """The person's live job, for the Standing screen.
+
+    RLS scopes this; there is no user_id in the query. Returns the most recent open
+    episode, or the latest closed one if nothing is open.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT employer_name, soc_code, worksite_state, offered_wage, wage_unit,
+                   start_date, end_date, hours_per_week
+            FROM employment_episodes
+            ORDER BY (end_date IS NULL) DESC, start_date DESC
+            LIMIT 1
+            """
+        )
+        return cur.fetchone()

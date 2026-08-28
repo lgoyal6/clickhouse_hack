@@ -415,6 +415,72 @@ def wage_percentile(soc_code: str, state: str, wage: float,
     }
 
 
+@app.get("/v1/standing")
+def standing(sc_session: str | None = Cookie(default=None),
+             fiscal_year: int | None = Query(default=None)):
+    """Screen 6, for the signed-in person, with no parameters to get wrong.
+
+    Reads the person's own occupation, state and offered wage from Postgres (scoped
+    by RLS), then asks the corpus where that wage sits. The build spec has the agent
+    assembling these arguments itself, which is three chances to hallucinate a SOC
+    code; here the facts come from the record and the model just reads the answer.
+    """
+    subject_id = subject(sc_session)
+    with repo.subject_tx(subject_id) as conn:
+        job = repo.current_employment(conn)
+
+    if job is None:
+        return {"has_employment": False,
+                "message": "No employment on file. Add your first job to see where "
+                           "your wage sits."}
+    if not job["soc_code"] or not job["worksite_state"] or job["offered_wage"] is None:
+        missing = [k for k in ("soc_code", "worksite_state", "offered_wage")
+                   if not job[k]]
+        return {"has_employment": True, "employer": job["employer_name"],
+                "incomplete": missing,
+                "message": f"Missing {', '.join(missing)} for this job. "
+                           f"Add it to see where your wage sits."}
+
+    wage = float(job["offered_wage"])
+    if (job["wage_unit"] or "Year") == "Hour":
+        wage *= 2080
+
+    corpus = wage_percentile(soc_code=job["soc_code"], state=job["worksite_state"],
+                             wage=wage, fiscal_year=fiscal_year)
+
+    # The rule that makes the wage question meaningful at all, with its provenance.
+    #
+    # This is the one rule in the table left unverified, and this is where its warning
+    # band renders. The build spec cites it as "Final Rule 2025-12-29" with no Federal
+    # Register number. Surfacing that on the screen it governs is the thesis working:
+    # the product tells you which of its own numbers it cannot stand behind.
+    # See docs/REVIEW.md E1.
+    with repo.reference_tx() as conn:
+        ruleset = repo.load_ruleset(conn)
+    selection = ruleset.governing("lottery_selection", dt.date.today())
+
+    return {
+        "has_employment": True,
+        "employer": job["employer_name"],
+        "job": {"soc_code": job["soc_code"], "state": job["worksite_state"],
+                "annual_wage": wage, "hours_per_week": job["hours_per_week"]},
+        "corpus": corpus,
+        "selection_rule": {
+            "rule_id": selection.rule_id,
+            "rule_key": selection.rule_key,
+            "method": selection.param("method"),
+            "citation": selection.citation,
+            "authority": selection.authority,
+            "effective_from": _iso(selection.effective_from),
+            "source_url": selection.source_url,
+            "verified": selection.verified,
+            "verified_by": selection.verified_by,
+            "note": selection.note,
+        },
+        "disclaimer": DISCLAIMER,
+    }
+
+
 @app.get("/healthz")
 def healthz():
     return {
