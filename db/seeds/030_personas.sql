@@ -58,12 +58,21 @@ INSERT INTO status_periods (user_id, status_type, layer, start_date, confidence)
 VALUES ('00000000-0000-4000-8000-00000000d001', 'H1B', 'primary',
         '2021-10-01', 'document_verified');
 
+-- SOC 25-1071 (Health Specialties Teachers, Postsecondary) rather than 25-1199.
+-- 25-1199 has ONE certified filing in California in the whole corpus; 25-1071 has 48
+-- in FY2025. The Standing screen needs an occupation the corpus actually covers, and
+-- a nursing-programme instructor is both realistic and adjacent to Maria's world.
+-- See docs/REVIEW.md C8.
+--
+-- His offer is deliberately below the median. The honest number is the interesting
+-- number: the corpus reflects who gets sponsored, which skews to full faculty, so an
+-- adjunct lands low and the screen says so.
 INSERT INTO employment_episodes
   (user_id, employer_name, start_date, hours_per_week,
    soc_code, worksite_state, offered_wage, wage_unit, employment_kind)
 VALUES
   ('00000000-0000-4000-8000-00000000d001', 'Bay Area Community College',
-   '2021-10-01', 40, '25-1199', 'CA', 78000, 'Year', 'paid');
+   '2021-10-01', 40, '25-1071', 'CA', 92000, 'Year', 'paid');
 
 -- Deliberately no gc_milestones for Daniel. That absence is what makes ac21_365
 -- fire, and it is a deadline set by an employer's inaction he cannot see.
