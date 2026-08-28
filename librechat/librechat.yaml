@@ -39,10 +39,25 @@ mcpServers:
   # See docs/REVIEW.md H2.
   status_clock:
     type: stdio
-    command: python
-    args: ["-m", "agents.mcp.status_clock"]
+    # `uv run --with` rather than plain `python`. The LibreChat image ships python,
+    # uv and uvx but NOT httpx, jsonschema or mcp, so `python -m agents.mcp.status_clock`
+    # dies on import. uv resolves them into an ephemeral environment at launch, which
+    # avoids rebuilding a 4 GB image to add three packages.
+    command: uv
+    args:
+      - run
+      - --with=httpx>=0.28
+      - --with=jsonschema>=4.26
+      - --with=mcp>=2.0
+      - python
+      - -m
+      - agents.mcp.status_clock
     env:
       STATUS_CLOCK_API: "http://host.docker.internal:8000"
+      PYTHONPATH: "/app"
+      # Persist uv's cache on the mounted volume so the resolve happens once rather
+      # than on every server start.
+      UV_CACHE_DIR: "/app/client/public/images/.uv-cache"
 
   # Official ClickHouse MCP, against the READ-ONLY user Person A provisions in
   # clickhouse/ddl/090_readonly_user.sql. The agent composes SQL; an agent that can
@@ -61,3 +76,7 @@ mcpServers:
       CLICKHOUSE_PASSWORD: "${CH_READONLY_PASSWORD}"
       CLICKHOUSE_SECURE: "false"
       CLICKHOUSE_READONLY: "1"
+      # Persist uv's cache on the mounted volume. Without it, uvx recompiles lz4 from
+      # source on every start (Alpine/musl has no prebuilt wheel), which takes longer
+      # than LibreChat's 30s MCP connection timeout and the server never connects.
+      UV_CACHE_DIR: "/app/client/public/images/.uv-cache"
