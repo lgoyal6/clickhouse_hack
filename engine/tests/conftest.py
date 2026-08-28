@@ -54,7 +54,7 @@ def maria():
     layer discriminator exists. See docs/REVIEW.md A3.
     """
     return UserState(
-        user_id="00000000-0000-4000-8000-00000000ma01",
+        user_id="00000000-0000-4000-8000-00000000a001",
         locale="es",
         h1b_first_entry=None,
         status_periods=(
@@ -79,7 +79,7 @@ def maria():
 def daniel():
     """Adjunct instructor, H-1B year five, nothing filed."""
     return UserState(
-        user_id="00000000-0000-4000-8000-00000000da01",
+        user_id="00000000-0000-4000-8000-00000000d001",
         h1b_first_entry=D(2021, 10, 1),
         status_periods=(
             StatusPeriod("H1B", "primary", D(2021, 10, 1), None),

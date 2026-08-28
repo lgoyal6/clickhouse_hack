@@ -28,8 +28,8 @@ app = FastAPI(
 # Demo sessions. Two personas, two sessions, deliberately NOT one endpoint with a
 # user_id parameter. See docs/REVIEW.md D1.
 DEMO_SESSIONS = {
-    "sess_maria": ("00000000-0000-4000-8000-00000000ma01", "clocks_maria_stem_opt.json"),
-    "sess_daniel": ("00000000-0000-4000-8000-00000000da01", "clocks_daniel_h1b.json"),
+    "sess_maria": ("00000000-0000-4000-8000-00000000a001", "clocks_maria_stem_opt.json"),
+    "sess_daniel": ("00000000-0000-4000-8000-00000000d001", "clocks_daniel_h1b.json"),
 }
 
 

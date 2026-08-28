@@ -254,3 +254,25 @@ def _days(a, b):
     while d <= b:
         yield d
         d += datetime.timedelta(days=1)
+
+
+# ------------------------------------------------------- regression -----------
+
+def test_demo_user_ids_are_real_uuids(maria, daniel):
+    """These strings reach Postgres as UUID.
+
+    They were originally written with 'ma01'/'da01' suffixes, which are not hex, so
+    every insert failed with 'invalid input syntax for type uuid' the first time the
+    migrations were run against a real database. Python never parsed them, so the
+    tests passed and the defect was invisible until the SQL executed.
+    """
+    import uuid
+    for state in (maria, daniel):
+        assert str(uuid.UUID(state.user_id)) == state.user_id
+
+
+def test_api_session_map_uses_real_uuids():
+    import uuid
+    from api.main import DEMO_SESSIONS
+    for session, (subject_id, _fixture) in DEMO_SESSIONS.items():
+        assert str(uuid.UUID(subject_id)) == subject_id, session
