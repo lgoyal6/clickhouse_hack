@@ -269,10 +269,3 @@ def test_demo_user_ids_are_real_uuids(maria, daniel):
     import uuid
     for state in (maria, daniel):
         assert str(uuid.UUID(state.user_id)) == state.user_id
-
-
-def test_api_session_map_uses_real_uuids():
-    import uuid
-    from api.main import DEMO_SESSIONS
-    for session, (subject_id, _fixture) in DEMO_SESSIONS.items():
-        assert str(uuid.UUID(subject_id)) == subject_id, session

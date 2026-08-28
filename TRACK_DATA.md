@@ -6,11 +6,14 @@ You own `db/`, `clickhouse/`, `engine/`, `ingest/`, `api/`, `infra/data.compose.
 ## First thing
 
 ```bash
-make -f Makefile.data verify
+make -f Makefile.data deps up migrate seed ch-ddl
+make -f Makefile.data verify     # 52 tests + the contract check
+make -f Makefile.data demo       # both personas' clocks, computed, from the API
 ```
 
-That runs the engine tests and the contract check without needing a database.
-Both should be green before you change anything.
+`demo` prints real output. If it prints `Días de desempleo remaining=16` and a
+cap-gap card with `struck SEP 30 2026 delta=+183d`, the whole spine is working:
+Postgres to engine to contract to API.
 
 ## What is already true
 
@@ -28,83 +31,87 @@ from `docs/REVIEW.md` that changes a number:
 - a missing rule param raises instead of coercing to null (B5)
 - `inputs_hash` does not move when only the calendar moves (B6)
 
-## What has now been executed
+## What works end to end
 
-The SQL is no longer unrun. Against Postgres 17 and ClickHouse 26.7.5 in
-`infra/data.compose.yml`:
+`GET /v1/clocks` computes. It loads the person from Postgres inside a transaction
+bound to the session subject, resolves the governing rule set, runs the engine,
+fills `change_reason`, appends to the outbox, and serialises to the contract.
 
 ```
-db/migrations/0001..0006      6/6 applied clean on first run
-db/seeds/010, 020            applied; 13 rules, 2 supersession chains, all unverified
-clickhouse/ddl/010, 020, 030 applied; 4 materialized views created
-clickhouse/queries/*.sql     all execute
-engine/tests                 24 passed
+== sess_maria  as_of=2026-08-28  needs_attention=1
+   [critical] Días de desempleo  remaining=16
+        8 CFR 214.2(f)(10) | eff. 2008-04-08 | verified=False
+   [clear   ] Periodo cap-gap  remaining=216
+        struck SEP 30 2026  delta=+183d
+        H-1B Modernization Final Rule | eff. 2025-01-17 | verified=False
+   [not running] ac21_365       not in H-1B status; the six-year meter has not started
+   [not running] h1b_max_stay   not in H-1B status; the six-year meter has not started
+```
+
+Verified against Postgres 17 and ClickHouse 26.7.5:
+
+```
+db/migrations/0001..0007     applied clean
+db/seeds/010, 020, 030       13 rules, 2 supersession chains, 2 personas
+clickhouse/ddl/010,020,030   4 materialized views created and populating
+engine/tests                 28 passed   (no database)
+api/tests                    24 passed   (real Postgres, real routes)
 contracts/validate.py        contract green
 ```
 
-Behaviour, not just syntax. Each of these was run and checked:
+**RLS is load-bearing, not decorative.** `api/repository.py` deliberately omits
+`WHERE user_id` on every query. Migration 0007 adds an app role with
+`NOBYPASSRLS`, because a superuser bypasses row security unconditionally and the
+policies would exist and never fire. Tests assert that a transaction bound to Maria
+sees exactly 3 status periods and 1 user, that naming Daniel's id explicitly returns
+zero rows, and that passing `?user_id=` changes nothing.
 
-| Check | Result |
-|---|---|
-| STEM OPT primary period accepted | ok |
-| CAP_GAP stacked on top, overlapping it | **accepted** |
-| AOS_PENDING also stacked | **accepted** |
-| A second overlapping primary status | rejected, 23P01 |
-| Two overlapping CAP_GAP periods | rejected, 23P01 |
-| CAP_GAP mislabelled as `layer='primary'` | rejected, check constraint |
-| A forked `supersedes` chain | rejected, `one_successor_per_rule` |
-| Overlapping rule effective windows | rejected, `no_overlapping_rule_windows` |
-| `{"dayz":60}` instead of `{"days":60}` | rejected, param-shape trigger |
-| Superseding a different `rule_key` | rejected, trigger |
+**Ten constraint behaviours checked individually.** Cap-gap and a pending I-485 are
+accepted overlapping the primary status; a second overlapping primary status, two
+overlapping cap-gaps, a forked `supersedes` chain, overlapping rule windows,
+`{"dayz":60}`, and superseding a different `rule_key` are all rejected.
 
-Three findings, proven with numbers rather than argued:
-
-- **A8, wage annualisation.** A row with unit `PER HOUR` annualises to NULL and is
-  excluded; a `$150,000/hour` typo is flagged `wage_suspect` and excluded. Under the
-  spec's `multiIf` the first would have entered the distribution as a $52 annual
-  salary and the second as $312,000,000.
-- **A7, `days_to_decision`.** A pending PERM case now yields NULL. The spec's
-  `UInt16` column stores **45,447** for the same row.
-- **A1, replay.** On identical data, the spec's `argMaxIf` query returns **zero
-  rows** for the pending grace-period change, and `clickhouse/queries/replay_diff.sql`
-  returns both users with `days_lost` of 60 and 41 and `newly_critical` set.
+**Three findings now carry numbers.** A pending PERM case stores **45,447** days
+under the spec's `UInt16`. A `$150,000/hour` typo becomes **$312,000,000** in the
+wage distribution under the spec's `multiIf`. On identical data the spec's replay
+query returns **zero rows** where `replay_diff.sql` returns both affected users.
 
 ## What is still NOT verified
 
-- **The API has never served a computed clock.** Every route in `api/main.py` returns
-  a fixture with a `_warning` field. Nothing is wired to the engine or to Postgres.
-- **RLS has never been exercised through the API.** The policies exist and apply, but
-  no request has set the `status_clock.subject` GUC.
-- **No real OFLC file has been loaded.** `ingest/load.py --dry-run` was tested against
-  synthetic CSVs only. The column maps in `ingest/column_maps.py` are still guesses;
-  run `python -m ingest.headers` on a real file first.
-- **`employer_fein` and `worksite_msa` are 100% missing** in the synthetic data, which
-  proves the quality query works and says nothing about the real corpus. Check it.
+- **`/v1/claims/check` and `/v1/corpus/wage-percentile` are still fixtures.** Both
+  carry a `_warning`. The wage one says outright that a fabricated percentile is the
+  harm this product exists to prevent.
+- **No real OFLC file has been loaded.** `ingest/load.py --dry-run` was tested
+  against synthetic CSVs only, so `ingest/column_maps.py` is still guesses. Run
+  `python -m ingest.headers` on a real file before trusting it.
+- **`employer_fein` and `worksite_msa` were 100% missing** in the synthetic data,
+  which proves the quality query works and says nothing about the real corpus.
+- **The outbox is never drained.** Rows accumulate with `replicated_at IS NULL`;
+  nothing carries them to ClickHouse yet.
 - **PeerDB has not been attempted.**
-- **Every rule is unverified against its primary source.** That is deliberate and the
-  UI depends on it, but E2, E3 and E4 are yours to close.
+- **No alerts are generated or delivered**, and `alert_templates` is empty.
+- **Every rule is unverified against its primary source.** Deliberate, and the UI
+  depends on it, but E2, E3 and E4 are yours to close.
 
 ## Then, in order
 
-1. **Wire `/v1/clocks` to the engine.** Load `UserState` from Postgres with the
-   subject GUC set, resolve the `RuleSet`, call `engine.evaluate.evaluate()`. The
-   fixtures in `api/main.py` exist only so Person B is not blocked; every stub
-   response carries a `_warning` field saying it must not be demoed.
-2. **`make -f Makefile.data ch-ddl` before loading anything.** A materialized view
-   only sees inserts that arrive after it is created.
-3. **`python -m ingest.headers <file>` before writing a loader.** Confirm whether
-   `employer_fein` and `worksite_msa` exist at all. The design already assumes they
-   may not (REVIEW C2, C3), but confirm rather than assume.
-4. **`make -f Makefile.data quality` must pass** before any corpus query is trusted.
-   Unknown wage units mean rows are excluded, never coerced.
-5. **Measure the replay query.** `rows_scanned` and `elapsed_ms` are zero in the
-   fixtures on purpose. Run it with and without the `by_clock` projection and put
-   both timings on the architecture slide. One measured number beats three
-   paragraphs of "runs in seconds in ClickHouse".
-6. **Timebox PeerDB.** Decide the fallback before you start: batch copy, ClickHouse's
-   native Postgres integration, or ClickHouse Cloud's Postgres CDC pipe. Losing three
-   hours to a replication slot is the most likely way this project ends up
-   incomplete (REVIEW C6).
+1. **Load two fiscal years of LCA data.** `python -m ingest.headers <file>` first,
+   fix `column_maps.py`, then `--dry-run`, then load. `make -f Makefile.data quality`
+   must pass before any corpus query is trusted.
+2. **Wire `/v1/corpus/wage-percentile`** to `clickhouse/queries/wage_percentile.sql`.
+   Exact scan, not interpolated from quantile states. Return `n_filings` always.
+3. **Drain the outbox to ClickHouse.** Simplest working version first: a loop that
+   selects `WHERE replicated_at IS NULL`, inserts into `clock_evaluations`, and
+   stamps the rows. That is a real CDC path and it takes twenty minutes. PeerDB is
+   an upgrade, not a prerequisite.
+4. **Measure the replay query.** `rows_scanned` and `elapsed_ms` come back real from
+   `/v1/scenarios/replay` now, but the population-scale query has never run on
+   volume. Seed 50k synthetic users, run it with and without the `by_clock`
+   projection, and put both timings on the architecture slide.
+5. **Generate alerts** in the same transaction as the evaluations, using
+   `template_key` plus params. Person B writes the reviewed Spanish.
+6. **Timebox PeerDB.** Decide the fallback before starting: step 3 above already is
+   one.
 
 ## Your review findings
 

@@ -6,10 +6,13 @@ SHELL := /bin/bash
 PG    := postgresql://postgres:$${POSTGRES_PASSWORD:-devonly}@localhost:5432/status_clock
 CH    := clickhouse client --host localhost --password $${CLICKHOUSE_PASSWORD:-devonly}
 
-.PHONY: help up down migrate seed ch-ddl quality test api verify reset
+.PHONY: help deps up down migrate seed ch-ddl quality test itest api verify reset demo
 
 help:
 	@grep -E '^[a-z-]+:.*?##' $(MAKEFILE_LIST) | sed 's/:.*##/\t/' | column -t -s $$'\t'
+
+deps:          ## install python dependencies
+	python -m pip install -r requirements.txt
 
 up:            ## start postgres + clickhouse
 	docker compose -f infra/data.compose.yml up -d --wait
@@ -32,16 +35,42 @@ quality:       ## data quality gates. Must pass before trusting any corpus query
 test:          ## engine unit tests. No database required.
 	python -m pytest engine/tests -q
 
+itest:         ## API integration tests. Needs 'up migrate seed'.
+	python -m pytest api/tests -q
+
+demo:          ## print both personas' computed clocks straight from the API
+	@python -c "$$DEMO_PY"
+
 api:           ## run the API
 	uvicorn api.main:app --reload --port 8000
 
-verify:        ## everything that can be checked without loading the corpus
-	python -m pytest engine/tests -q
+verify:        ## engine + API + contract. Needs 'up migrate seed'.
+	python -m pytest engine/tests api/tests -q
 	python contracts/validate.py
 	@echo
-	@echo "Still unverified after this: the SQL in db/ and clickhouse/ has not been"
-	@echo "executed. Run 'make -f Makefile.data up migrate seed ch-ddl' to prove it."
+	@echo "Still unverified after this: no real OFLC file has been loaded, so the"
+	@echo "column maps in ingest/column_maps.py are still guesses, and no rule has"
+	@echo "been checked against its primary source."
 
 reset:         ## destroy local data and start over
 	docker compose -f infra/data.compose.yml down -v
 	rm -rf infra/pgdata infra/clickhouse-data
+
+define DEMO_PY
+import sys; sys.path.insert(0, ".")
+from fastapi.testclient import TestClient
+from api.main import app
+c = TestClient(app)
+for sess in ("sess_maria", "sess_daniel"):
+    b = c.get("/v1/clocks", cookies={"sc_session": sess}, params={"as_of": "2026-08-28"}).json()
+    print("\n== " + sess + "  as_of=" + b["as_of"] + "  needs_attention=" + str(b["needs_attention"]))
+    for k in b["clocks"]:
+        if not k["applicable"]:
+            print("   [not running] %-20s %s" % (k["clock_key"], k["not_applicable_reason"])); continue
+        p = k["provenance"]
+        print("   [%-8s] %s  remaining=%s" % (k["severity"], k["label"], k["days_remaining"]))
+        if k.get("superseded"):
+            print("        struck %s  delta=+%sd" % (k["superseded"]["prior_value"], k["superseded"]["delta_days"]))
+        print("        %s | eff. %s | verified=%s" % (p["citation"], p["effective_from"], p["verified"]))
+endef
+export DEMO_PY
