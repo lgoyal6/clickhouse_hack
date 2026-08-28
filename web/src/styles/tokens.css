@@ -1,0 +1,76 @@
+/* Status Clock design tokens.
+ *
+ * Palette from docs/BUILD_SPEC.md 7, with two additions forced by measurement.
+ * Contrast ratios below are computed against --paper using the WCAG 2.1 relative
+ * luminance formula, not estimated. See docs/REVIEW.md F.
+ */
+
+:root {
+  /* ---- surfaces and text ---- */
+  --paper:  #F1F3EE;   /* pale green-grey, the colour of a check or a certificate */
+  --ink:    #16191C;   /* 15.79:1  passes AAA. All body text. */
+  --stamp:  #2B4C7E;   /*  7.71:1  passes AAA. Structure, labels, links, focus. */
+  --urgent: #B03A2E;   /*  5.38:1  passes AA. Critical only, never decorative. */
+
+  /* --clear measures 4.39:1, which clears the 3:1 large-text threshold but NOT
+   * the 4.5:1 normal-text threshold. Use it only on the enormous counts. */
+  --clear:  #3F7D58;   /*  4.39:1  LARGE TEXT ONLY */
+
+  /* --rule measures 2.90:1. It is fine for hairlines, which are decorative, and
+   * it fails badly for text. The build spec sets the citation line at 11px in
+   * --rule, which makes the one element it calls non-optional the least readable
+   * text on the screen. See docs/REVIEW.md F1. */
+  --rule:   #8A9187;   /*  2.90:1  HAIRLINES ONLY, NEVER TEXT */
+
+  /* ---- the two additions ---- */
+  --rule-text:  #666D62;  /* 4.78:1  passes AA. The citation line lives here. */
+  --clear-text: #2F6244;  /* 6.37:1  passes AA. Small confidence tags. */
+
+  --amber-hairline: #B8862B;   /* warn state hairline only */
+
+  /* ---- type ---- */
+  --font-display: "Archivo Condensed", "Archivo", system-ui, sans-serif;
+  --font-body: Inter, system-ui, -apple-system, sans-serif;
+  --font-data: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* Every date and every count in the product renders in --font-data with tabular
+   * figures. Numbers never appear in a proportional face anywhere. */
+  --figures: tabular-nums;
+
+  --step-0: 0.9375rem;   /* 15px body */
+  --leading-body: 1.4667; /* 15/22 */
+
+  --hairline: 1px;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: var(--step-0);
+  line-height: var(--leading-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Keyboard focus is visible and in --stamp, which measures 7.71:1. */
+:focus-visible {
+  outline: 2px solid var(--stamp);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

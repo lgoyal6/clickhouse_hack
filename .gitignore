@@ -40,3 +40,4 @@ uploads/
 .idea/
 .vscode/
 *.swp
+.gstack/

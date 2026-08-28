@@ -1,0 +1,8 @@
+# Person B's stack. Separate from the root requirements.txt (Person A's, for
+# contracts/validate.py) so the two tracks never collide on one file.
+#
+#   pip install -r agents/requirements.txt
+httpx>=0.28
+jsonschema>=4.26
+mcp>=2.0
+pytest>=8

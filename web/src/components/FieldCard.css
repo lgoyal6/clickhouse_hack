@@ -1,0 +1,121 @@
+/* The Field Card. The signature element.
+ *
+ * Provenance is inside the box, always. It is not a tooltip and it is not
+ * collapsible. If the citation is missing the card renders an error state rather
+ * than an uncited number, because an uncited number is the one thing this product
+ * cannot show. See docs/BUILD_SPEC.md 7 and docs/REVIEW.md H2.
+ */
+
+.field-card {
+  border: var(--hairline) solid var(--rule);
+  background: var(--paper);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.field-card__eyebrow {
+  font-family: var(--font-display);
+  font-size: 0.6875rem;              /* 11px */
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+
+/* Every count. Tabular figures hold width so the tick animation cannot reflow. */
+.field-card__count {
+  font-family: var(--font-data);
+  font-variant-numeric: var(--figures);
+  font-size: clamp(2rem, 7vw, 3.25rem);
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+
+.field-card__count--clear    { color: var(--clear); }
+.field-card__count--critical { color: var(--urgent); }
+
+.field-card__denominator {
+  font-family: var(--font-data);
+  font-variant-numeric: var(--figures);
+  color: var(--rule-text);           /* NOT --rule. 4.78:1 vs 2.90:1. REVIEW F1. */
+  font-size: 0.8125rem;
+}
+
+.field-card--warn     { border-color: var(--amber-hairline); }
+.field-card--critical { border-color: var(--urgent); }
+
+/* The strikethrough. Draws left to right, once, on first reveal. */
+.field-card__prior {
+  font-family: var(--font-data);
+  font-variant-numeric: var(--figures);
+  font-size: 1.25rem;
+  color: var(--rule-text);
+  position: relative;
+  width: max-content;
+}
+
+.field-card__prior::after {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; top: 52%;
+  height: 2px;
+  background: var(--urgent);
+  transform-origin: left center;
+  animation: strike 320ms ease-out forwards;
+}
+
+@keyframes strike { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .field-card__prior::after { animation: none; transform: scaleX(1); }
+}
+
+.field-card__divider {
+  border: 0;
+  border-top: var(--hairline) solid var(--rule);
+  margin: var(--space-2) 0 0;
+}
+
+/* The citation. --rule-text, not --rule. This is the promise of the product and it
+ * has to be legible. */
+.field-card__provenance {
+  font-family: var(--font-data);
+  font-size: 0.6875rem;              /* 11px */
+  color: var(--rule-text);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+}
+
+.field-card__provenance a { color: var(--stamp); text-decoration: underline; }
+
+/* Unverified rules carry a visible band. The product does not pretend to certainty
+ * it has not earned. Never suppress this. */
+.field-card__unverified {
+  font-family: var(--font-data);
+  font-size: 0.6875rem;
+  color: var(--urgent);
+  border-top: var(--hairline) dashed var(--urgent);
+  padding-top: var(--space-1);
+}
+
+.field-card__derived {
+  font-size: 0.75rem;
+  color: var(--rule-text);
+  font-style: normal;
+}
+
+.clock-wall {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  gap: var(--space-4);
+  padding: var(--space-4);
+  max-width: 68rem;
+}
+
+/* 375px: one column, cards keep full provenance. */
+@media (max-width: 26rem) {
+  .clock-wall { grid-template-columns: 1fr; }
+}

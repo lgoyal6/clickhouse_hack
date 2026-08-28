@@ -1,0 +1,63 @@
+# LibreChat configuration for Status Clock.
+#
+# Pin the model in ONE place. docs/BUILD_SPEC.md 6 specifies `claude-sonnet-4-6`,
+# which should be checked against the current model list before the demo; if the
+# LibreChat prize is in play, do not ship a guessed model id. See docs/REVIEW.md H1.
+
+version: 1.2.8
+
+interface:
+  customWelcome: >
+    Tell me what you were told, or upload a document. I will show you which rule
+    version governs your case and when it changed. Every number comes with its
+    citation and its effective date.
+  privacyPolicy:
+    externalUrl: ""
+  termsOfService:
+    externalUrl: ""
+
+registration:
+  socialLogins: []
+
+# Guided document intake. I-20s, EADs, I-797s, I-94 printouts.
+fileConfig:
+  endpoints:
+    agents:
+      fileLimit: 8
+      fileSizeLimit: 20
+      totalSizeLimit: 100
+      supportedMimeTypes:
+        - "application/pdf"
+        - "image/png"
+        - "image/jpeg"
+        - "image/heic"
+
+mcpServers:
+  # Person A's API, wrapped. Every tool response carries provenance as a REQUIRED
+  # field, so the model cannot receive an uncited number and has nothing uncited to
+  # repeat. That is a structural guarantee, unlike a system prompt instruction.
+  # See docs/REVIEW.md H2.
+  status_clock:
+    type: stdio
+    command: python
+    args: ["-m", "agents.mcp.status_clock"]
+    env:
+      STATUS_CLOCK_API: "http://host.docker.internal:8000"
+
+  # Official ClickHouse MCP, against the READ-ONLY user Person A provisions in
+  # clickhouse/ddl/090_readonly_user.sql. The agent composes SQL; an agent that can
+  # compose SQL against a writable connection is a hole, not a feature.
+  #
+  # clock_evaluations is deliberately NOT granted to this user. Per-person data is
+  # reachable only through status_clock, where identity comes from the session.
+  clickhouse:
+    type: stdio
+    command: uvx
+    args: ["mcp-clickhouse"]
+    env:
+      CLICKHOUSE_HOST: "host.docker.internal"
+      CLICKHOUSE_PORT: "8123"
+      CLICKHOUSE_USER: "chat_readonly"
+      CLICKHOUSE_PASSWORD: "${CH_READONLY_PASSWORD}"
+      CLICKHOUSE_SECURE: "false"
+      CLICKHOUSE_READONLY: "1"

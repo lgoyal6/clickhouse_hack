@@ -1,0 +1,30 @@
+# Person B's targets. Person A has Makefile.data. No shared Makefile, no conflicts.
+#
+#   make -f Makefile.chat help
+
+SHELL := /bin/bash
+
+.PHONY: help web up down test verify
+
+help:          ## list targets
+	@grep -E '^[a-z-]+:.*?##' $(MAKEFILE_LIST) | sed 's/:.*##/\t/' | column -t -s $$'\t'
+
+web:           ## serve the Clock Wall from the repo root, reading the fixtures
+	@echo "open http://localhost:5173/web/"
+	python3 -m http.server 5173
+
+up:            ## start LibreChat
+	docker compose -f librechat/chat.compose.yml --env-file librechat/.env up -d
+
+down:          ## stop it
+	docker compose -f librechat/chat.compose.yml down
+
+test:          ## tool contract tests. No backend required.
+	python -m pytest agents/tests -q
+
+verify:        ## everything checkable without a backend
+	python -m pytest agents/tests -q
+	python contracts/validate.py
+	@echo
+	@echo "Still unverified after this: the LibreChat container has not been started"
+	@echo "and no MCP tool has actually been called. Run 'make -f Makefile.chat up'."
