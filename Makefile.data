@@ -1,0 +1,47 @@
+# Person A's targets. Person B has Makefile.chat. No shared Makefile, so no conflicts.
+#
+#   make -f Makefile.data help
+
+SHELL := /bin/bash
+PG    := postgresql://postgres:$${POSTGRES_PASSWORD:-devonly}@localhost:5432/status_clock
+CH    := clickhouse client --host localhost --password $${CLICKHOUSE_PASSWORD:-devonly}
+
+.PHONY: help up down migrate seed ch-ddl quality test api verify reset
+
+help:
+	@grep -E '^[a-z-]+:.*?##' $(MAKEFILE_LIST) | sed 's/:.*##/\t/' | column -t -s $$'\t'
+
+up:            ## start postgres + clickhouse
+	docker compose -f infra/data.compose.yml up -d --wait
+
+down:          ## stop them
+	docker compose -f infra/data.compose.yml down
+
+migrate:       ## apply Postgres migrations in order
+	@for f in db/migrations/*.sql; do echo "== $$f"; psql "$(PG)" -v ON_ERROR_STOP=1 -f "$$f" || exit 1; done
+
+seed:          ## seed rule param shapes and rules
+	@for f in db/seeds/*.sql; do echo "== $$f"; psql "$(PG)" -v ON_ERROR_STOP=1 -f "$$f" || exit 1; done
+
+ch-ddl:        ## apply ClickHouse DDL. ORDER MATTERS: views before data. REVIEW A5.
+	@for f in clickhouse/ddl/0*.sql; do echo "== $$f"; $(CH) --multiquery < "$$f" || exit 1; done
+
+quality:       ## data quality gates. Must pass before trusting any corpus query.
+	$(CH) --multiquery < clickhouse/queries/data_quality.sql
+
+test:          ## engine unit tests. No database required.
+	python -m pytest engine/tests -q
+
+api:           ## run the API
+	uvicorn api.main:app --reload --port 8000
+
+verify:        ## everything that can be checked without loading the corpus
+	python -m pytest engine/tests -q
+	python contracts/validate.py
+	@echo
+	@echo "Still unverified after this: the SQL in db/ and clickhouse/ has not been"
+	@echo "executed. Run 'make -f Makefile.data up migrate seed ch-ddl' to prove it."
+
+reset:         ## destroy local data and start over
+	docker compose -f infra/data.compose.yml down -v
+	rm -rf infra/pgdata infra/clickhouse-data
