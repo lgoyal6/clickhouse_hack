@@ -22,6 +22,7 @@ from psycopg import errors as pgerrors
 
 from engine import ENGINE_VERSION
 from engine.evaluate import change_reason, evaluate
+from . import clickhouse as ch
 from . import repository as repo
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
@@ -295,17 +296,129 @@ def check_claim(body: dict):
     return payload
 
 
+CORPUS_COVERAGE = "DOL OFLC LCA disclosure, FY2024 Q4 and FY2025 Q4, CERTIFIED only"
+
+PERCENTILE_SQL = (REPO / "clickhouse" / "queries" / "wage_percentile.sql").read_text()
+LEVEL_SQL = (REPO / "clickhouse" / "queries" / "wage_level.sql").read_text()
+
+
+def _sql(text: str) -> str:
+    """Extract the statement from a commented .sql file.
+
+    Comments are stripped BEFORE splitting on the first semicolon. Doing it the other
+    way round breaks the moment prose in the header contains a semicolon, which
+    silently yields an empty query and a 503 that looks like ClickHouse being down.
+    """
+    body = "\n".join(l for l in text.splitlines() if not l.strip().startswith("--"))
+    stmt = body.split(";")[0].strip()
+    if not stmt.upper().lstrip().startswith(("SELECT", "WITH")):
+        raise RuntimeError(f"refusing to run a non-SELECT: {stmt[:80]!r}")
+    return stmt
+
+
 @app.get("/v1/corpus/wage-percentile")
-def wage_percentile(soc_code: str, state: str, wage: float, fiscal_year: int | None = None):
-    # TODO: clickhouse/queries/wage_percentile.sql. Exact scan (REVIEW A6).
-    payload = json.loads((FIXTURES / "wage_percentile.json").read_text())
-    payload["_warning"] = (
-        "PLACEHOLDER NUMBERS. Not wired to ClickHouse. A fabricated percentile is the "
-        "exact harm this product exists to prevent; do not show this on stage."
-    )
-    return payload
+def wage_percentile(soc_code: str, state: str, wage: float,
+                    fiscal_year: int | None = None):
+    """Where an offered wage sits among certified LCA filings.
+
+    An exact scan, not an interpolation between stored quantile states
+    (docs/REVIEW.md A6). The SOC code is normalised on the way in, because the corpus
+    carries both '15-1252.00' and bare '15-1252' for the same occupation and a
+    caller-supplied suffix would otherwise return nothing.
+
+    The percentile is peer-distribution CONTEXT. `wage_level` is the statistic the
+    selection mechanism is understood to use, and the two can disagree
+    (docs/REVIEW.md B10). Both are returned; neither is presented as odds.
+    """
+    fy = fiscal_year or 2025
+    soc = ch.normalise_soc(soc_code)
+    params = {"soc": soc, "state": state.upper(), "wage": wage, "fy": fy}
+
+    try:
+        rows, elapsed = ch.query(_sql(PERCENTILE_SQL), params)
+    except ch.ClickHouseError as exc:
+        raise HTTPException(503, detail=f"corpus unavailable: {exc}") from None
+
+    row = rows[0] if rows else {}
+    n = int(row.get("n_filings") or 0)
+    # soc_code, state, fiscal_year and wage are echoed from the request here rather
+    # than from the SQL. Echoing a parameter back under a column's own name inside
+    # the query creates an alias that WHERE then resolves against, which silently
+    # removes the filter. See the header of wage_percentile.sql.
+
+    if n == 0:
+        # An empty result is an answer, and it must not look like a working query.
+        # Home health aides have single-digit filings in the entire corpus: the LCA
+        # corpus covers H-1B occupations, which are overwhelmingly technical. Saying
+        # so is the honest answer. See docs/REVIEW.md C8.
+        return {
+            "soc_code": soc, "soc_title": None, "state": state.upper(),
+            "fiscal_year": fy, "wage": wage,
+            "percentile": None, "n_filings": 0,
+            "quantiles": None, "wage_level": None, "next_level_wage": None,
+            "insufficient_data": True,
+            "message": (
+                f"No certified LCA filings for {soc} in {state.upper()} in FY{fy}. "
+                f"This corpus covers H-1B labour condition applications, which are "
+                f"concentrated in technical occupations. A percentile cannot be "
+                f"computed and will not be estimated."
+            ),
+            "source": {"dataset": "DOL OFLC LCA Disclosure Data",
+                       "coverage": CORPUS_COVERAGE, "retrieved_at": "2026-08-28"},
+            "elapsed_ms": elapsed,
+        }
+
+    try:
+        levels, level_ms = ch.query(_sql(LEVEL_SQL), params)
+    except ch.ClickHouseError:
+        levels, level_ms = [], 0.0
+
+    # Which level does this offer clear? The highest whose median it meets.
+    order = ["I", "II", "III", "IV"]
+    cleared, next_wage = None, None
+    by_level = {str(l["pw_level"]): float(l["prevailing_median"]) for l in levels
+                if l.get("prevailing_median") is not None}
+    for name in order:
+        median = by_level.get(name)
+        if median is None:
+            continue
+        if wage >= median:
+            cleared = order.index(name) + 1
+        elif next_wage is None:
+            next_wage = median
+
+    return {
+        "soc_code": soc, "soc_title": row.get("soc_title"),
+        "state": state.upper(), "fiscal_year": fy, "wage": wage,
+        "percentile": float(row["percentile"]),
+        "n_filings": n,
+        "quantiles": {k: float(row[k]) for k in ("p10", "p25", "p50", "p75", "p90")},
+        "wage_level": cleared,
+        "next_level_wage": next_wage,
+        "level_bands": [
+            {"level": str(l["pw_level"]), "n": int(l["n"]),
+             "prevailing_median": float(l["prevailing_median"])}
+            for l in levels
+        ],
+        "insufficient_data": n < 30,
+        "message": (
+            f"Percentile computed over {n:,} certified filings. This is where the "
+            f"offer sits among peer filings; it is not a selection probability. The "
+            f"wage-weighted mechanism is understood to weight by OES wage level, "
+            f"which is the level_bands field."
+            + ("" if n >= 30 else " Fewer than 30 filings: treat this percentile as "
+                                  "indicative only.")
+        ),
+        "source": {"dataset": "DOL OFLC LCA Disclosure Data",
+                   "coverage": CORPUS_COVERAGE, "retrieved_at": "2026-08-28"},
+        "elapsed_ms": round(elapsed + level_ms, 2),
+    }
 
 
 @app.get("/healthz")
 def healthz():
-    return {"ok": True, "engine_version": ENGINE_VERSION}
+    return {
+        "ok": True,
+        "engine_version": ENGINE_VERSION,
+        "corpus": "up" if ch.available() else "down",
+    }
