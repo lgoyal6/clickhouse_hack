@@ -54,7 +54,10 @@ def query(sql: str, params: dict | None = None, timeout: int = 30,
     for key, value in (params or {}).items():
         args[f"param_{key}"] = str(value)
 
-    url = f"http://{CH_HOST}:{CH_PORT}/?" + urllib.parse.urlencode(args)
+    # TLS above 8123 so the same client works against ClickHouse Cloud, which serves
+    # the HTTP interface on 8443. See clickhouse/cloud/migrate.sh.
+    scheme = "https" if CH_PORT == 8443 or os.environ.get("CLICKHOUSE_SECURE") == "1" else "http"
+    url = f"{scheme}://{CH_HOST}:{CH_PORT}/?" + urllib.parse.urlencode(args)
     req = urllib.request.Request(url, data=(body or "").encode(), method="POST")
     req.add_header("X-ClickHouse-User", CH_USER)
     req.add_header("X-ClickHouse-Key", CH_PASSWORD)
