@@ -1,149 +1,164 @@
-/* The Field Card. The signature element.
+/* The Field Card and the Clock Wall.
  *
- * Provenance is inside the box, always. It is not a tooltip and it is not
- * collapsible. If the citation is missing the card renders an error state rather
- * than an uncited number, because an uncited number is the one thing this product
- * cannot show. See docs/BUILD_SPEC.md 7 and docs/REVIEW.md H2.
+ * Signature element: a countdown rendered as a document field. Hairline box,
+ * small-caps eyebrow, the count enormous in tabular mono, and beneath a divider the
+ * citation and its effective date. The provenance is INSIDE the box, always. It is
+ * not a tooltip and it does not collapse, because it is the product's whole claim.
+ *
+ * What does collapse is the derivation: the arithmetic behind a derived number is
+ * worth reading once and then getting out of the way. Everything load-bearing stays
+ * visible; only the explanation folds.
  */
 
-.field-card {
-  container-type: inline-size;   /* so the count can size off the card width */
-  border: var(--hairline) solid var(--rule);
-  background: var(--paper);
-  padding: var(--space-4);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
+/* ---------- wall ---------- */
 
-.field-card__eyebrow-row {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space-2);
-}
+.wall-head { padding: var(--space-6) 0 var(--space-4); }
+.wall-head__row { display: flex; align-items: baseline; gap: var(--space-4);
+  flex-wrap: wrap; }
+.wall-head__name { font-family: var(--font-display); font-size: 1.5rem;
+  letter-spacing: -0.01em; margin: 0; }
+.wall-head__summary { font-size: 0.9375rem; color: var(--rule-text); margin: 0; }
+.wall-head__meta { font-family: var(--font-data); font-variant-numeric: tabular-nums;
+  font-size: 0.75rem; color: var(--rule-text); margin: var(--space-2) 0 0; }
 
-.field-card__eyebrow {
-  font-family: var(--font-display);
-  font-size: 0.6875rem;              /* 11px */
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--ink);
-}
-
-/* Plain-language status, read at a glance without decoding the count or the
- * severity color alone. Bordered, not a filled/rounded pill, to stay in the
- * card's document register rather than reading as a generic dashboard chip. */
-.field-card__status {
-  font-family: var(--font-body);
-  font-size: 0.6875rem;
-  font-weight: 600;
-  white-space: nowrap;
-  border: var(--hairline) solid currentColor;
-  padding: 1px var(--space-2);
-}
-
-.field-card__status--critical { color: var(--urgent); }
-.field-card__status--warn     { color: var(--amber-hairline); }
-.field-card__status--clear    { color: var(--clear-text); }
-
-/* Every count. Tabular figures hold width so the tick animation cannot reflow. */
-.field-card__count {
-  font-family: var(--font-data);
-  font-variant-numeric: var(--figures);
-  /* Scales with the CARD, not the viewport. 7vw overflowed a 240px grid column and
-     wrapped "134 / 150" onto two lines, which breaks the whole point of tabular
-     figures holding their width. cqi needs the container-type below. */
-  font-size: clamp(1.75rem, 13cqi, 3.25rem);
-  line-height: 1.05;
-  letter-spacing: -0.02em;
-  color: var(--ink);
-  white-space: nowrap;
-}
-
-.field-card__count--clear    { color: var(--clear); }
-.field-card__count--critical { color: var(--urgent); }
-
-.field-card__denominator {
-  font-family: var(--font-data);
-  font-variant-numeric: var(--figures);
-  color: var(--rule-text);           /* NOT --rule. 4.78:1 vs 2.90:1. REVIEW F1. */
-  font-size: 0.8125rem;
-}
-
-.field-card--warn     { border-color: var(--amber-hairline); }
-.field-card--critical { border-color: var(--urgent); }
-
-/* The strikethrough. Draws left to right, once, on first reveal. */
-.field-card__prior {
-  font-family: var(--font-data);
-  font-variant-numeric: var(--figures);
-  font-size: 1.25rem;
-  color: var(--rule-text);
-  position: relative;
-  width: max-content;
-}
-
-.field-card__prior::after {
-  content: "";
-  position: absolute;
-  left: 0; right: 0; top: 52%;
-  height: 2px;
-  background: var(--urgent);
-  transform-origin: left center;
-  animation: strike 320ms ease-out forwards;
-}
-
-@keyframes strike { from { transform: scaleX(0); } to { transform: scaleX(1); } }
-
-@media (prefers-reduced-motion: reduce) {
-  .field-card__prior::after { animation: none; transform: scaleX(1); }
-}
-
-.field-card__divider {
-  border: 0;
-  border-top: var(--hairline) solid var(--rule);
-  margin: var(--space-2) 0 0;
-}
-
-/* The citation. --rule-text, not --rule. This is the promise of the product and it
- * has to be legible. */
-.field-card__provenance {
-  font-family: var(--font-data);
-  font-size: 0.6875rem;              /* 11px */
-  color: var(--rule-text);
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1) var(--space-2);
-}
-
-.field-card__provenance a { color: var(--stamp); text-decoration: underline; }
-
-/* Unverified rules carry a visible band. The product does not pretend to certainty
- * it has not earned. Never suppress this. */
-.field-card__unverified {
-  font-family: var(--font-data);
-  font-size: 0.6875rem;
-  color: var(--urgent);
-  border-top: var(--hairline) dashed var(--urgent);
-  padding-top: var(--space-1);
-}
-
-.field-card__derived {
-  font-size: 0.75rem;
-  color: var(--rule-text);
-  font-style: normal;
-}
+.group { margin-top: var(--space-6); }
+.group__head { display: flex; align-items: center; gap: var(--space-3);
+  margin: 0 0 var(--space-3); }
+.group__title { font-family: var(--font-display); font-size: 0.6875rem;
+  letter-spacing: 0.12em; text-transform: uppercase; margin: 0; }
+.group__title--urgent { color: var(--urgent); }
+.group__title--calm { color: var(--rule-text); }
+.group__rule { flex: 1; border: 0; border-top: var(--hairline) solid var(--rule);
+  margin: 0; }
+.group__count { font-family: var(--font-data); font-size: 0.6875rem;
+  color: var(--rule-text); }
 
 .clock-wall {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(19rem, 1fr));
   gap: var(--space-4);
-  padding: var(--space-4);
-  max-width: 68rem;
+  align-items: start;
 }
 
-/* 375px: one column, cards keep full provenance. */
+/* ---------- card ---------- */
+
+.field-card {
+  container-type: inline-size;
+  border: var(--hairline) solid var(--rule);
+  background: var(--paper);
+  padding: var(--space-4) var(--space-4) var(--space-3);
+  display: flex; flex-direction: column; gap: var(--space-2);
+}
+.field-card--warn     { border-color: var(--amber-hairline); }
+.field-card--critical { border-color: var(--urgent); border-width: 2px;
+                        padding: calc(var(--space-4) - 1px); }
+
+.field-card__top { display: flex; align-items: flex-start; gap: var(--space-2);
+  justify-content: space-between; }
+.field-card__eyebrow {
+  font-family: var(--font-display); font-size: 0.6875rem; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--ink); margin: 0;
+}
+.field-card__tag {
+  font-family: var(--font-data); font-size: 0.625rem; letter-spacing: 0.02em;
+  white-space: nowrap; padding: 2px var(--space-2);
+  border: var(--hairline) solid currentColor; color: var(--rule-text);
+}
+.field-card__tag--critical { color: var(--urgent); }
+.field-card__tag--warn     { color: var(--amber-hairline); }
+.field-card__tag--clear    { color: var(--clear-text); }
+
+/* The struck-through prior value. Draws once, left to right, on first reveal. */
+.field-card__prior {
+  font-family: var(--font-data); font-variant-numeric: tabular-nums;
+  font-size: 1.125rem; color: var(--rule-text);
+  position: relative; width: max-content; margin: 0;
+}
+.field-card__prior::after {
+  content: ""; position: absolute; left: 0; right: 0; top: 52%; height: 2px;
+  background: var(--urgent); transform-origin: left center;
+  animation: strike 320ms 260ms ease-out both;
+}
+@keyframes strike { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+
+/* Every count in the product. Sizes off the CARD, never the viewport: a viewport
+   unit overflows a narrow grid column and wraps the figure onto two lines, which
+   defeats the entire point of tabular figures holding their width. */
+.field-card__count {
+  font-family: var(--font-data); font-variant-numeric: tabular-nums;
+  font-size: clamp(1.625rem, 12cqi, 2.5rem);
+  line-height: 1.05; letter-spacing: -0.02em; color: var(--ink);
+  margin: 0; white-space: nowrap;
+}
+.field-card__count--clear    { color: var(--clear); }
+.field-card__count--critical { color: var(--urgent); }
+
+.field-card__sub {
+  font-family: var(--font-data); font-variant-numeric: tabular-nums;
+  font-size: 0.75rem; color: var(--rule-text); margin: 0; line-height: 1.5;
+}
+
+/* Progress rail, for the clocks that consume a budget. Redundant with the number by
+   design: the bar is scannable, the number is exact, and neither is load-bearing
+   alone. */
+.field-card__rail { height: 3px; background: var(--rule); position: relative;
+  margin: var(--space-1) 0 0; }
+.field-card__rail span { position: absolute; inset: 0 auto 0 0; background: var(--clear); }
+.field-card--warn     .field-card__rail span { background: var(--amber-hairline); }
+.field-card--critical .field-card__rail span { background: var(--urgent); }
+
+/* The derivation folds. The citation never does. */
+.field-card__why { margin: 0; }
+.field-card__why summary {
+  font-family: var(--font-data); font-size: 0.6875rem; color: var(--stamp);
+  cursor: pointer; list-style: none; padding: var(--space-1) 0;
+}
+.field-card__why summary::-webkit-details-marker { display: none; }
+.field-card__why summary::before { content: "+ "; }
+.field-card__why[open] summary::before { content: "– "; }
+.field-card__why p { font-size: 0.8125rem; line-height: 1.5; color: var(--ink);
+  margin: var(--space-1) 0 0; }
+
+.field-card__divider { border: 0; border-top: var(--hairline) solid var(--rule);
+  margin: var(--space-1) 0 0; }
+
+/* The citation. --rule-text at 4.78:1, never --rule at 2.90:1. This is the one
+   element the product calls non-optional; it has to be legible. */
+.field-card__provenance {
+  font-family: var(--font-data); font-size: 0.6875rem; color: var(--rule-text);
+  margin: 0; line-height: 1.55;
+}
+.field-card__provenance a { color: var(--stamp); }
+
+.field-card__unverified {
+  font-family: var(--font-data); font-size: 0.6875rem; color: var(--urgent);
+  border-top: var(--hairline) dashed var(--urgent);
+  padding-top: var(--space-1); margin: 0;
+}
+
+.field-card__corpus {
+  font-family: var(--font-data); font-size: 0.6875rem; color: var(--ink);
+  background: var(--muted-band, rgba(43, 76, 126, 0.06));
+  border-left: 2px solid var(--stamp);
+  padding: var(--space-2) var(--space-3); margin: var(--space-1) 0 0; line-height: 1.5;
+}
+
+/* ---------- not running ---------- */
+
+.notrunning { margin-top: var(--space-8); }
+.notrunning ul { list-style: none; padding: 0; margin: 0;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(19rem, 1fr));
+  gap: var(--space-2) var(--space-4); }
+.notrunning li { font-size: 0.8125rem; color: var(--rule-text);
+  padding: var(--space-2) 0; border-top: var(--hairline) solid var(--rule);
+  line-height: 1.45; }
+.notrunning b { font-family: var(--font-display); font-size: 0.6875rem;
+  letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink);
+  display: block; font-weight: 500; margin-bottom: 2px; }
+
 @media (max-width: 26rem) {
-  .clock-wall { grid-template-columns: 1fr; }
+  .clock-wall, .notrunning ul { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .field-card__prior::after { animation: none; transform: scaleX(1); }
 }

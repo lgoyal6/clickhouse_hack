@@ -335,7 +335,7 @@ def get_my_clocks(
     # number differ enough to change what someone should do.
     for c in out:
         if c["clock_key"] == "ac21_365" and c["applicable"]:
-            ctx = perm_context()
+            ctx = perm_context(lang)
             if ctx:
                 c["corpus_context"] = ctx
     running = [c for c in out if c["applicable"]]
@@ -506,40 +506,6 @@ LEVEL_SQL = (REPO / "clickhouse" / "queries" / "wage_level.sql").read_text()
 PERM_SQL = (REPO / "clickhouse" / "queries" / "perm_timeline.sql").read_text()
 
 
-def perm_context(fy: int = 2025) -> dict | None:
-    """How long PERM actually takes, from the corpus.
-
-    Attached to ac21_365 because the clock alone is a true number that omits the part
-    that matters. AC21 needs a filing PENDING 365 days, so the clock derives a filing
-    deadline of six-year-mark minus 365. The corpus says the median certified PERM
-    runs 462 days end to end. Someone who files exactly at the derived deadline
-    satisfies the statute with zero margin.
-
-    Returns None rather than guessing if the corpus is not loaded.
-    """
-    try:
-        rows, _ = ch.query(_sql(PERM_SQL), {"fy": fy})
-    except (ch.ClickHouseError, RuntimeError):
-        return None
-    if not rows or not int(rows[0].get("n") or 0):
-        return None
-    r = rows[0]
-    return {
-        "median_days": int(r["median_days"]),
-        "p90_days": int(r["p90_days"]),
-        "n_filings": int(r["n"]),
-        "source": {"dataset": "DOL OFLC PERM Disclosure Data",
-                   "coverage": f"FY{fy}, CERTIFIED only", "retrieved_at": "2026-08-28"},
-        "note": (
-            f"The median certified PERM took {int(r['median_days'])} days end to end "
-            f"across {int(r['n']):,} filings, and {int(r['p90_days'])} days at the 90th "
-            f"percentile. The 365 days in AC21 is how long a filing must have been "
-            f"PENDING, not how long the process takes. Filing at this deadline leaves "
-            f"no margin."
-        ),
-    }
-
-
 def _sql(text: str) -> str:
     """Extract the statement from a commented .sql file.
 
@@ -552,6 +518,56 @@ def _sql(text: str) -> str:
     if not stmt.upper().lstrip().startswith(("SELECT", "WITH")):
         raise RuntimeError(f"refusing to run a non-SELECT: {stmt[:80]!r}")
     return stmt
+
+
+PERM_NOTE = {
+    "en": ("The median certified PERM took {median} days end to end across {n} "
+           "filings, and {p90} days at the 90th percentile. The 365 days in AC21 is "
+           "how long a filing must have been PENDING, not how long the process takes. "
+           "Filing at this deadline leaves no margin."),
+    "es": ("El PERM certificado mediano tardó {median} días en total sobre {n} "
+           "solicitudes, y {p90} días en el percentil 90. Los 365 días de AC21 son el "
+           "tiempo que una solicitud debe llevar PENDIENTE, no lo que tarda el "
+           "proceso. Presentar en esta fecha no deja margen."),
+    "hi": ("{n} आवेदनों में औसत प्रमाणित PERM को आरंभ से अंत तक {median} दिन लगे, और 90वें "
+           "पर्सेंटाइल पर {p90} दिन। AC21 के 365 दिन यह हैं कि आवेदन कितने समय से लंबित "
+           "है, न कि प्रक्रिया में कितना समय लगता है। इस तिथि पर आवेदन करने से कोई "
+           "मार्जिन नहीं बचता।"),
+}
+
+
+def perm_context(locale: str = DEFAULT_LOCALE) -> dict | None:
+    """How long PERM actually takes, from the corpus, in the caller's language.
+
+    Attached to ac21_365 because the clock alone is a true number that omits the part
+    that matters. AC21 needs a filing PENDING 365 days, so the clock derives a filing
+    deadline of six-year-mark minus 365. The corpus says the median certified PERM
+    runs well past that end to end, so filing at the derived deadline satisfies the
+    statute with zero margin.
+
+    Spans the WHOLE loaded corpus rather than one fiscal year, so this figure and the
+    one quoted on the landing page cannot contradict each other.
+
+    Returns None rather than guessing if the corpus is not loaded.
+    """
+    try:
+        rows, _ = ch.query(_sql(PERM_SQL))
+    except (ch.ClickHouseError, RuntimeError):
+        return None
+    if not rows or not int(rows[0].get("n") or 0):
+        return None
+    r = rows[0]
+    median, p90, n = int(r["median_days"]), int(r["p90_days"]), int(r["n"])
+    return {
+        "median_days": median,
+        "p90_days": p90,
+        "n_filings": n,
+        "source": {"dataset": "DOL OFLC PERM Disclosure Data",
+                   "coverage": "FY2024 and FY2025, CERTIFIED only",
+                   "retrieved_at": "2026-08-28"},
+        "note": (PERM_NOTE.get(locale) or PERM_NOTE["en"]).format(
+            median=median, p90=p90, n=f"{n:,}"),
+    }
 
 
 @app.get("/v1/corpus/wage-percentile")

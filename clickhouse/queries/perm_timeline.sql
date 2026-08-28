@@ -12,7 +12,9 @@
 -- process itself runs 16 months is a true number that leaves out the part that
 -- matters.
 --
--- Parameters: {fy:UInt16}
+-- No fiscal-year parameter: this is the whole loaded corpus. Quoting a single
+-- year's median next to a landing page that quotes the corpus median is how two
+-- true numbers end up contradicting each other in front of a judge.
 
 SELECT
     count()                                       AS n,
@@ -22,5 +24,4 @@ SELECT
     round(min(days_to_decision))                  AS fastest_days
 FROM perm_filings
 WHERE case_status_norm LIKE 'CERTIFIED%'
-  AND fiscal_year = {fy:UInt16}
   AND days_to_decision BETWEEN 0 AND 2000;

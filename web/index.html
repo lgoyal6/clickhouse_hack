@@ -7,171 +7,174 @@
 <link rel="stylesheet" href="src/styles/tokens.css">
 <link rel="stylesheet" href="src/components/FieldCard.css">
 <style>
-  header { border-bottom: var(--hairline) solid var(--rule); padding: var(--space-4); max-width: 68rem; }
-  h1 { font-family: var(--font-display); font-size: 1.125rem; letter-spacing: .08em;
-       text-transform: uppercase; margin: 0 0 var(--space-2); }
-  .meta { font-family: var(--font-data); font-variant-numeric: var(--figures);
-          font-size: .75rem; color: var(--rule-text); }
-  .persona { padding: var(--space-4) var(--space-4) 0; max-width: 68rem; }
-  .persona button { font: inherit; font-family: var(--font-data); font-size: .75rem;
-      background: none; border: var(--hairline) solid var(--rule); color: var(--ink);
-      padding: var(--space-1) var(--space-3); cursor: pointer; }
-  .persona button[aria-pressed="true"] { border-color: var(--stamp); color: var(--stamp); }
-  .notrunning { max-width: 68rem; padding: 0 var(--space-4) var(--space-8); }
-  .notrunning h2 { font-family: var(--font-display); font-size: .6875rem;
-      letter-spacing: .08em; text-transform: uppercase; color: var(--rule-text);
-      border-top: var(--hairline) solid var(--rule); padding-top: var(--space-3); }
-  .notrunning li { font-family: var(--font-data); font-size: .75rem; color: var(--rule-text);
-      list-style: none; margin-bottom: var(--space-1); }
-  footer { max-width: 68rem; padding: var(--space-4); font-size: .75rem; color: var(--rule-text); }
-  .topnav { display: flex; gap: var(--space-4); max-width: 68rem; padding: var(--space-4) var(--space-4) 0; }
-  .topnav a { font-family: var(--font-display); font-size: .75rem; letter-spacing: .06em;
-      text-transform: uppercase; color: var(--rule-text); text-decoration: none;
-      padding-bottom: var(--space-2); border-bottom: 2px solid transparent; }
-  .topnav a[aria-current="page"] { color: var(--ink); border-color: var(--stamp); }
-  .persona button { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
-  .persona button .persona__name { font-family: var(--font-body); font-size: .8125rem; font-weight: 600; }
-  .persona button .persona__role { color: var(--rule-text); }
-  .persona button[aria-pressed="true"] .persona__role { color: var(--stamp); }
-  main#wall { max-width: 68rem; }
-  .clock-group__title { font-family: var(--font-display); font-size: .75rem;
-      letter-spacing: .08em; text-transform: uppercase; margin: var(--space-6) 0 0;
-      padding: 0 var(--space-4); color: var(--ink); }
-  .clock-group[data-group="attention"] .clock-group__title { color: var(--urgent); }
-  .clock-group:first-of-type .clock-group__title { margin-top: var(--space-4); }
+  .wrap { max-width: 72rem; margin: 0 auto; padding: 0 var(--space-6); }
+  .topbar { display: flex; align-items: baseline; gap: var(--space-4);
+    padding: var(--space-4) 0; flex-wrap: wrap; }
+  .topbar__mark { font-family: var(--font-display); font-size: 1rem;
+    letter-spacing: .1em; text-transform: uppercase; margin: 0; }
+  .topbar__spacer { flex: 1; }
+  .topbar a { font-family: var(--font-data); font-size: .8125rem; color: var(--stamp);
+    text-decoration: none; padding-bottom: 2px; }
+  .topbar a[aria-current="page"] { color: var(--ink);
+    border-bottom: 2px solid var(--stamp); }
+  .topbar a:hover { text-decoration: underline; }
+
+  .hairline { border: 0; border-top: var(--hairline) solid var(--rule); margin: 0; }
+
+  .controls { display: flex; gap: var(--space-6); flex-wrap: wrap;
+    padding: var(--space-4) 0; align-items: flex-start; }
+  .ctl__label { font-family: var(--font-display); font-size: .625rem;
+    letter-spacing: .12em; text-transform: uppercase; color: var(--rule-text);
+    margin: 0 0 var(--space-2); }
+  .chips { display: flex; gap: 0; }
+  .chip { font: inherit; font-family: var(--font-data); font-size: .8125rem;
+    background: none; cursor: pointer; padding: var(--space-2) var(--space-3);
+    border: var(--hairline) solid var(--rule); color: var(--ink);
+    display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
+    transition: background 160ms ease, border-color 160ms ease; }
+  .chip + .chip { border-left: 0; }
+  .chip:hover { background: rgba(43,76,126,.05); }
+  .chip[aria-pressed="true"] { border-color: var(--stamp); color: var(--stamp);
+    box-shadow: inset 0 -2px 0 var(--stamp); }
+  .chip[aria-pressed="true"] + .chip { border-left: 0; }
+  .chip small { color: var(--rule-text); font-size: .6875rem; }
+  .chip[aria-pressed="true"] small { color: var(--stamp); }
+
+  .flag { display: flex; gap: var(--space-2); align-items: baseline;
+    border-left: 2px solid var(--urgent); padding: var(--space-2) var(--space-3);
+    margin-top: var(--space-6); font-size: .875rem; }
+  .flag a { color: var(--stamp); }
+
+  footer { padding: var(--space-6) 0 var(--space-8); font-family: var(--font-data);
+    font-size: .75rem; color: var(--rule-text); }
+  .err { font-family: var(--font-data); font-size: .875rem; }
+  .err a { color: var(--stamp); }
 </style>
 </head>
 <body>
 
-<header>
-  <h1>Status Clock</h1>
-  <p class="meta" id="asof"></p>
-</header>
+<div class="wrap">
+  <nav class="topbar" aria-label="Sections">
+    <p class="topbar__mark">Status Clock</p>
+    <a href="/ui/" aria-current="page">Clock Wall</a>
+    <a href="/ui/ask.html">Ask</a>
+    <div class="topbar__spacer"></div>
+    <a href="/ui/landing.html">About</a>
+  </nav>
+</div>
+<hr class="hairline">
 
-<nav class="topnav" aria-label="Sections">
-  <a href="index.html" aria-current="page">Clock Wall</a>
-  <a href="ask.html">Ask</a>
-</nav>
+<div class="wrap">
+  <div class="controls">
+    <div>
+      <p class="ctl__label">Demo session</p>
+      <div class="chips" id="personas"></div>
+    </div>
+    <div>
+      <p class="ctl__label">Language</p>
+      <div class="chips" id="langs"></div>
+    </div>
+  </div>
+</div>
+<hr class="hairline">
 
-<!-- Persona switching is two sessions, not two user ids. The API has no route that
-     accepts a user id; see contracts/openapi.yaml and docs/REVIEW.md D1. -->
-<nav class="persona" aria-label="Demo session">
-  <button data-session="sess_maria" aria-pressed="true">
-    <span class="persona__name">Maria</span><span class="persona__role">STEM OPT worker</span>
-  </button>
-  <button data-session="sess_daniel" aria-pressed="false">
-    <span class="persona__name">Daniel</span><span class="persona__role">H-1B worker</span>
-  </button>
-</nav>
+<div class="wrap">
+  <header class="wall-head">
+    <div class="wall-head__row">
+      <h1 class="wall-head__name" id="person">&nbsp;</h1>
+      <p class="wall-head__summary" id="summary"></p>
+    </div>
+    <p class="wall-head__meta" id="meta"></p>
+  </header>
 
-<main id="wall"></main>
+  <main id="wall"></main>
 
-<section class="notrunning" id="notrunning" hidden>
-  <h2>Not running yet</h2>
-  <ul id="notrunning-list"></ul>
-</section>
+  <section class="notrunning" id="notrunning" hidden>
+    <div class="group__head">
+      <h2 class="group__title group__title--calm" id="nr-title">Not running yet</h2>
+      <hr class="group__rule">
+    </div>
+    <ul id="nr-list"></ul>
+  </section>
 
-<footer>This is information, not legal advice.</footer>
+  <footer id="foot"></footer>
+</div>
 
 <script type="module">
-// Reads the contract fixtures directly. When Person A's API is up, change BASE to
-// http://localhost:8000 and drop the fixture map. Nothing else changes.
-// Served by the API at /ui, so this is same-origin and the session cookie rides
-// along automatically. Set LIVE = false to fall back to the contract fixtures, which
-// is how this page worked before the API existed and still works with no backend.
+/* Served by the API at /ui, so this is same-origin and the session cookie rides
+   along. Set LIVE = false to fall back to the contract fixtures, which is how this
+   page worked before the API existed and still works with no backend. */
 const LIVE = true;
 const FIXTURES = {
   sess_maria:  '../contracts/fixtures/clocks_maria_stem_opt.json',
   sess_daniel: '../contracts/fixtures/clocks_daniel_h1b.json',
 };
-
-function currentSession() {
-  const m = document.cookie.match(/(?:^|;\s*)sc_session=([^;]+)/);
-  return m ? m[1] : 'sess_maria';
-}
+const PERSONAS = [
+  { session: 'sess_maria',  name: 'Maria',  role: 'STEM OPT' },
+  { session: 'sess_daniel', name: 'Daniel', role: 'H-1B' },
+];
 
 const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
-const fmtDate = iso => new Date(iso + 'T00:00:00')
+const cookie = n => (document.cookie.match(new RegExp('(?:^|;\\s*)'+n+'=([^;]+)'))||[])[1];
+const fmt = iso => new Date(iso + 'T00:00:00')
   .toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 
 async function load(session) {
-  if (LIVE) {
-    // No user id in the URL. The API reads the session cookie and nothing else.
-    const r = await fetch(`/v1/clocks?as_of=2026-08-28`, { credentials: 'same-origin' });
-    if (!r.ok) throw new Error(`API ${r.status}`);
-    return r.json();
-  }
-  return (await fetch(FIXTURES[session])).json();
+  if (!LIVE) return (await fetch(FIXTURES[session])).json();
+  const r = await fetch('/v1/clocks?as_of=2026-08-28', { credentials: 'same-origin' });
+  if (!r.ok) throw new Error(`API ${r.status}`);
+  return r.json();
 }
 
+/* The headline figure. Consumption clocks show used-of-budget, windows show the
+   date they close, deadlines show the date they fall. */
 function headline(c) {
-  if (c.kind === 'consumption') {
-    return c.days_consumed == null ? 'Closed' : `${c.days_consumed} / ${c.denominator}`;
-  }
-  if (c.kind === 'window') return fmtDate(c.window_end).toUpperCase();
-  return `${c.days_remaining}`;
+  if (c.kind === 'consumption') return `${c.days_consumed} / ${c.denominator}`;
+  if (c.kind === 'window' || c.window_end) return fmt(c.window_end).toUpperCase();
+  return String(c.days_remaining);
 }
 
-function subline(c) {
-  // Three numbers, three labels. 216 is days remaining; the window is 243 days
-  // long; 183 of those are the gain from the rule change. The spec's mock labels
-  // days-remaining as "days of work authorization". See docs/REVIEW.md F3.
-  //
-  // A closed clock (e.g. a filing window that already ended) carries
-  // days_remaining: null in the fixture. Rendering it unguarded prints the
-  // literal string "null days remaining" — a fabricated number, and one that
-  // reaches the accessible name too, in a product whose entire thesis is that
-  // every number traces to a citation. See docs/REVIEW.md F4-F5.
-  if (c.kind === 'consumption') {
-    return c.days_remaining == null ? 'Window closed' : `${c.days_remaining} days remaining`;
-  }
-  if (c.kind === 'window') {
-    const parts = c.days_remaining == null
-      ? ['Window closed']
-      : [`${c.days_remaining} days remaining`];
-    if (c.window_days) parts.push(`${c.window_days}-day window`);
-    if (c.superseded?.delta_days) parts.push(`${c.superseded.delta_days} days gained`);
-    return parts.join(' · ');
-  }
-  return `by ${fmtDate(c.window_end)}`;
+/* Three numbers deserve three labels. The build spec's mock called days-remaining
+   "days of work authorization"; the window length and the days gained over the
+   superseded rule are different quantities and each gets named. */
+function subline(c, s) {
+  const bits = [];
+  if (c.days_remaining !== null && c.days_remaining !== undefined)
+    bits.push(`${c.days_remaining} ${s.days_remaining}`);
+  if (c.kind === 'window' && c.window_days) bits.push(`${c.window_days}-${s.day_window}`);
+  if (c.superseded?.delta_days) bits.push(`${c.superseded.delta_days} ${s.days_gained}`);
+  return bits.join(' · ');
 }
 
-// Plain-language status, spoken and read before the raw severity token. A
-// reader who has never seen "critical/warn/clear" before still knows what to do.
-const STATUS_LABEL = { critical: 'Needs attention now', warn: 'Watch this one', clear: 'On track' };
+const TAGS = {
+  critical: { en: 'Act now', es: 'Actúe ahora', hi: 'अभी कार्रवाई करें' },
+  warn:     { en: 'Watch',   es: 'Vigilar',     hi: 'निगरानी रखें' },
+  info:     { en: 'Running', es: 'En curso',    hi: 'चल रहा है' },
+  clear:    { en: 'On track', es: 'En regla',   hi: 'ठीक है' },
+};
 
-function card(c) {
+function card(c, s, locale) {
   const el = document.createElement('article');
   el.className = `field-card field-card--${c.severity}`;
-
-  // The accessible name carries the final value and the citation from the start, so
-  // assistive tech never reads an intermediate number off the tick animation.
-  // See docs/REVIEW.md F4.
   el.setAttribute('role', 'group');
+
+  /* The accessible name carries the final value and the citation from the start, and
+     the animated digits are aria-hidden. Assistive tech must never read an
+     intermediate number off a tick: a wrong number spoken aloud is the same harm as
+     a wrong number displayed. */
   el.setAttribute('aria-label',
-    `${c.label}. ${STATUS_LABEL[c.severity] ? STATUS_LABEL[c.severity] + '. ' : ''}` +
-    `${headline(c)}. ${subline(c)}. ` +
-    `Governed by ${c.provenance.citation}, ${c.provenance.authority}, ` +
-    `effective ${c.provenance.effective_from}.` +
-    (c.provenance.verified ? '' : ' This rule is unverified.'));
+    `${c.label}. ${headline(c)}. ${subline(c, s)}. ` +
+    `${c.provenance.citation}, ${c.provenance.authority}, effective ${c.provenance.effective_from}.` +
+    (c.provenance.verified ? '' : ' ' + s.unverified + '.'));
 
-  const eyebrowRow = document.createElement('div');
-  eyebrowRow.className = 'field-card__eyebrow-row';
-
-  const eyebrow = document.createElement('p');
-  eyebrow.className = 'field-card__eyebrow';
-  eyebrow.textContent = c.label;
-  eyebrowRow.append(eyebrow);
-
-  if (STATUS_LABEL[c.severity]) {
-    const status = Object.assign(document.createElement('span'), {
-      className: `field-card__status field-card__status--${c.severity}`,
-      textContent: STATUS_LABEL[c.severity],
-    });
-    status.setAttribute('aria-hidden', 'true');
-    eyebrowRow.append(status);
-  }
-  el.append(eyebrowRow);
+  const top = document.createElement('div');
+  top.className = 'field-card__top';
+  top.innerHTML = `<p class="field-card__eyebrow"></p>
+    <span class="field-card__tag field-card__tag--${c.severity}"></span>`;
+  top.querySelector('.field-card__eyebrow').textContent = c.label;
+  top.querySelector('.field-card__tag').textContent =
+    (TAGS[c.severity] || TAGS.info)[locale] || TAGS[c.severity].en;
+  el.append(top);
 
   if (c.superseded) {
     const prior = document.createElement('p');
@@ -188,139 +191,169 @@ function card(c) {
   el.append(count);
 
   const sub = document.createElement('p');
-  sub.className = 'field-card__denominator';
+  sub.className = 'field-card__sub';
   sub.setAttribute('aria-hidden', 'true');
-  sub.textContent = subline(c);
+  sub.textContent = subline(c, s);
   el.append(sub);
 
-  if (c.derived && c.derivation) {
-    const d = document.createElement('p');
-    d.className = 'field-card__derived';
-    d.textContent = c.derivation;
-    el.append(d);
+  if (c.kind === 'consumption' && c.denominator) {
+    const rail = document.createElement('div');
+    rail.className = 'field-card__rail';
+    rail.setAttribute('aria-hidden', 'true');
+    const pct = Math.max(0, Math.min(100, 100 * c.days_consumed / c.denominator));
+    rail.innerHTML = `<span style="width:${pct}%"></span>`;
+    el.append(rail);
   }
 
-  el.append(Object.assign(document.createElement('hr'), { className: 'field-card__divider' }));
+  if (c.corpus_context) {
+    const ctx = document.createElement('p');
+    ctx.className = 'field-card__corpus';
+    ctx.textContent = c.corpus_context.note;
+    el.append(ctx);
+  }
+
+  if (c.derived && c.derivation) {
+    const why = document.createElement('details');
+    why.className = 'field-card__why';
+    const sum = document.createElement('summary');
+    sum.textContent = s.why;
+    const body = document.createElement('p');
+    body.textContent = c.derivation;
+    why.append(sum, body);
+    el.append(why);
+  }
+
+  el.append(Object.assign(document.createElement('hr'),
+    { className: 'field-card__divider' }));
 
   const prov = document.createElement('p');
   prov.className = 'field-card__provenance';
-  const link = document.createElement('a');
-  link.href = c.provenance.source_url;
-  link.textContent = c.provenance.citation;
-  link.rel = 'noreferrer';
-  prov.append(link);
-  prov.append(Object.assign(document.createElement('span'),
-    { textContent: `· eff. ${c.provenance.effective_from}` }));
-  if (c.superseded) {
-    prov.append(Object.assign(document.createElement('span'),
-      { textContent: `· supersedes rule of ${c.superseded.effective_from}` }));
-  }
+  const a = document.createElement('a');
+  a.href = c.provenance.source_url; a.rel = 'noreferrer';
+  a.textContent = c.provenance.citation;
+  prov.append(a, document.createTextNode(` · eff. ${c.provenance.effective_from}`));
+  if (c.superseded)
+    prov.append(document.createTextNode(` · ${s.supersedes} ${c.superseded.effective_from}`));
   el.append(prov);
 
-  // Unverified rules always show the band. Never suppress this.
+  /* Unverified rules always show the band. There is deliberately no way to hide it. */
   if (!c.provenance.verified) {
-    el.append(Object.assign(document.createElement('p'), {
-      className: 'field-card__unverified',
-      textContent: 'Unverified against the primary source.',
-    }));
+    el.append(Object.assign(document.createElement('p'),
+      { className: 'field-card__unverified', textContent: s.unverified }));
   }
   return el;
 }
 
 function tick(el, target) {
   if (reduced) return;
-  const digits = String(target).match(/\d+/);
-  if (!digits) return;
-  const end = Number(digits[0]);
-  const start = performance.now();
-  const dur = 400;
-  const frame = now => {
-    const t = Math.min(1, (now - start) / dur);
-    el.textContent = String(target).replace(/\d+/, String(Math.round(end * t)));
-    if (t < 1) requestAnimationFrame(frame);
-    else el.textContent = String(target);
+  const m = String(target).match(/\d+/);
+  if (!m) return;
+  const end = Number(m[0]), t0 = performance.now(), dur = 380;
+  const step = now => {
+    const p = Math.min(1, (now - t0) / dur);
+    el.textContent = String(target).replace(/\d+/, String(Math.round(end * p)));
+    if (p < 1) requestAnimationFrame(step); else el.textContent = String(target);
   };
-  requestAnimationFrame(frame);
+  requestAnimationFrame(step);
 }
 
-async function render(session) {
-  const data = await load(session);
+function group(title, urgent, clocks, s, locale) {
+  const sec = document.createElement('section');
+  sec.className = 'group';
+  const head = document.createElement('div');
+  head.className = 'group__head';
+  head.innerHTML =
+    `<h2 class="group__title group__title--${urgent ? 'urgent' : 'calm'}"></h2>
+     <hr class="group__rule"><span class="group__count">${clocks.length}</span>`;
+  head.querySelector('.group__title').textContent = title;
+  const grid = document.createElement('div');
+  grid.className = 'clock-wall';
+  for (const c of clocks) {
+    const el = card(c, s, locale);
+    grid.append(el);
+    tick(el.querySelector('.field-card__count'), headline(c));
+  }
+  sec.append(head, grid);
+  return sec;
+}
+
+function controls(data) {
+  const active = cookie('sc_session') || 'sess_maria';
+  const p = document.getElementById('personas');
+  p.replaceChildren(...PERSONAS.map(x => {
+    const b = document.createElement('button');
+    b.className = 'chip';
+    b.type = 'button';
+    b.setAttribute('aria-pressed', String(x.session === active));
+    b.innerHTML = `${x.name}<small>${x.role}</small>`;
+    /* Switching the SESSION, never a parameter. No endpoint anywhere accepts a user
+       id, which is why persona switching has to look like signing in. */
+    b.addEventListener('click', () => { window.location = `/session/${x.session}`; });
+    return b;
+  }));
+
+  const l = document.getElementById('langs');
+  l.replaceChildren(...(data.locales || []).map(x => {
+    const b = document.createElement('button');
+    b.className = 'chip';
+    b.type = 'button';
+    b.setAttribute('aria-pressed', String(x.code === data.locale));
+    b.textContent = x.name;
+    b.addEventListener('click', () => { window.location = `/lang/${x.code}`; });
+    return b;
+  }));
+}
+
+async function render() {
+  const data = await load(cookie('sc_session') || 'sess_maria');
+  const s = data.strings || {};
+  const locale = data.locale || 'en';
+  document.documentElement.lang = locale;
+  controls(data);
+
+  document.getElementById('person').textContent = data.person?.name || '';
+  document.getElementById('summary').textContent = data.person?.summary || '';
+
   const running = data.clocks.filter(c => c.applicable !== false);
   const notRunning = data.clocks.filter(c => c.applicable === false);
+  const urgent = running.filter(c => c.severity === 'critical' || c.severity === 'warn');
+  const calm   = running.filter(c => !urgent.includes(c));
 
-  document.getElementById('asof').textContent =
-    `As of ${fmtDate(data.as_of)} · ${running.length} clocks · ` +
-    `${data.needs_attention} needs attention`;
-
-  // Grouped by urgency, not just color-coded within one list, so a reader can
-  // act on "what needs me now" before scanning everything else.
-  const attention = running.filter(c => c.severity === 'critical' || c.severity === 'warn');
-  const onTrack = running.filter(c => c.severity !== 'critical' && c.severity !== 'warn');
+  document.getElementById('meta').textContent =
+    `${s.as_of || 'As of'} ${fmt(data.as_of)} · ${running.length} ${s.clocks || 'clocks'}` +
+    ` · ${data.needs_attention} ${s.needs_attention || 'need attention'}`;
 
   const wall = document.getElementById('wall');
   wall.replaceChildren();
-  for (const [group, title, items] of [
-    ['attention', 'Needs your attention', attention],
-    ['ontrack', 'On track', onTrack],
-  ]) {
-    if (items.length === 0) continue;
-    const section = document.createElement('section');
-    section.className = 'clock-group';
-    section.dataset.group = group;
-    section.append(Object.assign(document.createElement('h2'), {
-      className: 'clock-group__title', textContent: title,
-    }));
-    const grid = document.createElement('div');
-    grid.className = 'clock-wall';
-    section.append(grid);
-    wall.append(section);
-    for (const c of items) {
-      const el = card(c);
-      grid.append(el);
-      tick(el.querySelector('.field-card__count'), headline(c));
-    }
-  }
+  if (urgent.length) wall.append(group(
+    { en: 'Needs your attention', es: 'Requiere su atención', hi: 'आपके ध्यान की आवश्यकता' }[locale]
+      || 'Needs your attention', true, urgent, s, locale));
+  if (calm.length) wall.append(group(
+    { en: 'On track', es: 'En regla', hi: 'ठीक चल रहा है' }[locale] || 'On track',
+    false, calm, s, locale));
 
-  // Clocks that are not applicable get a quiet secondary row with the reason,
-  // rather than being drawn as if they were running. See docs/REVIEW.md B11.
-  const section = document.getElementById('notrunning');
-  const list = document.getElementById('notrunning-list');
-  list.replaceChildren();
-  section.hidden = notRunning.length === 0;
-  for (const c of notRunning) {
-    list.append(Object.assign(document.createElement('li'),
-      { textContent: `${c.clock_key} — ${c.not_applicable_reason}` }));
-  }
+  const sec = document.getElementById('notrunning');
+  sec.hidden = notRunning.length === 0;
+  document.getElementById('nr-title').textContent = s.not_running || 'Not running yet';
+  document.getElementById('nr-list').replaceChildren(...notRunning.map(c => {
+    const li = document.createElement('li');
+    const b = document.createElement('b');
+    b.textContent = c.label;
+    li.append(b, document.createTextNode(c.not_applicable_reason || ''));
+    return li;
+  }));
+
+  document.getElementById('foot').textContent = data.disclaimer || '';
 }
 
-for (const btn of document.querySelectorAll('.persona button')) {
-  btn.addEventListener('click', () => {
-    if (LIVE) {
-      // Switch the SESSION, not a parameter. The server sets the cookie and sends
-      // us back here, which is exactly how a real sign-in would behave.
-      window.location = `/session/${btn.dataset.session}`;
-      return;
-    }
-    for (const b of document.querySelectorAll('.persona button'))
-      b.setAttribute('aria-pressed', String(b === btn));
-    render(btn.dataset.session);
-  });
-}
-
-const active = currentSession();
-for (const b of document.querySelectorAll('.persona button'))
-  b.setAttribute('aria-pressed', String(b.dataset.session === active));
-
-render(active).catch(err => {
+render().catch(err => {
   const signedOut = /401/.test(err.message);
   document.getElementById('wall').innerHTML = signedOut
-    ? `<p style="font-family:var(--font-data)">
-         No session. <a href="/session/sess_maria">Sign in as Maria</a> or
-         <a href="/session/sess_daniel">as Daniel</a>.</p>`
-    : `<p style="font-family:var(--font-data);color:var(--urgent)">
-         Cannot reach the API (${err.message}). Start it with
-         <code>make -f Makefile.data api</code>, or set LIVE = false in this file to
-         render from the contract fixtures instead.</p>`;
+    ? `<p class="err">No session. <a href="/session/sess_maria">Sign in as Maria</a>
+         or <a href="/session/sess_daniel">as Daniel</a>.</p>`
+    : `<p class="err" style="color:var(--urgent)">Cannot reach the API (${err.message}).
+         Start it with <code>make -f Makefile.data api</code>, or set LIVE = false in
+         this file to render from the contract fixtures.</p>`;
 });
 </script>
 </body>

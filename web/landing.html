@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Status Clock — every deadline, with the rule that set it</title>
+<meta name="description" content="Immigration status countdowns computed against versioned rules. Every number traces to a citation and to the day it changed.">
+<link rel="stylesheet" href="src/styles/tokens.css">
+<style>
+/* Landing page. Structure follows the Trust & Authority pattern: mission, proof,
+   solution, one CTA path. Palette and type are the product's own, because a generic
+   corporate blue would throw away the one thing that makes this look like what it is.
+
+   No stock imagery and no generated document art. The hero is real product output.
+   A page about a product whose entire thesis is "other people's paperwork is stale"
+   should not open with an invented official-looking document. */
+
+* { box-sizing: border-box; }
+body { margin: 0; }
+
+.wrap { max-width: 68rem; margin: 0 auto; padding: 0 var(--space-6); }
+
+/* ---------- rules and rhythm ---------- */
+.hairline { border: 0; border-top: var(--hairline) solid var(--rule); margin: 0; }
+.eyebrow {
+  font-family: var(--font-display); font-size: 0.6875rem; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--rule-text); margin: 0 0 var(--space-3);
+}
+
+/* ---------- nav ---------- */
+.nav { display: flex; align-items: baseline; gap: var(--space-6);
+  padding: var(--space-4) 0; }
+.nav__mark { font-family: var(--font-display); font-size: 1rem; letter-spacing: .1em;
+  text-transform: uppercase; margin: 0; }
+.nav__spacer { flex: 1; }
+.nav a { font-family: var(--font-data); font-size: .8125rem; color: var(--stamp);
+  text-decoration: none; }
+.nav a:hover { text-decoration: underline; }
+
+/* ---------- hero ---------- */
+.hero { padding: var(--space-8) 0 var(--space-6); display: grid;
+  grid-template-columns: 1.05fr 0.95fr; gap: var(--space-8); align-items: start; }
+.hero h1 {
+  font-family: var(--font-display); font-weight: 700;
+  font-size: clamp(2.25rem, 5.4vw, 3.75rem); line-height: 1.02;
+  letter-spacing: -0.015em; margin: 0 0 var(--space-4); text-wrap: balance;
+}
+.hero__lead { font-size: 1.0625rem; line-height: 1.55; margin: 0 0 var(--space-4);
+  max-width: 34ch; }
+.hero__lead strong { font-weight: 600; }
+.hero__note { font-family: var(--font-data); font-size: .75rem; color: var(--rule-text);
+  margin: var(--space-4) 0 0; }
+
+.cta-row { display: flex; flex-wrap: wrap; gap: var(--space-3); margin-top: var(--space-6); }
+.btn {
+  font-family: var(--font-data); font-size: .875rem; letter-spacing: .01em;
+  padding: var(--space-3) var(--space-6); text-decoration: none; cursor: pointer;
+  border: var(--hairline) solid var(--stamp); color: var(--stamp); background: none;
+  transition: background 180ms ease, color 180ms ease;
+}
+.btn:hover { background: var(--stamp); color: var(--paper); }
+.btn--solid { background: var(--stamp); color: var(--paper); }
+.btn--solid:hover { background: var(--ink); border-color: var(--ink); }
+
+/* ---------- the specimen card ---------- */
+.specimen { border: var(--hairline) solid var(--rule); padding: var(--space-6);
+  background: var(--paper); }
+.specimen__tag { font-family: var(--font-display); font-size: .625rem;
+  letter-spacing: .12em; text-transform: uppercase; color: var(--rule-text);
+  margin: 0 0 var(--space-4); }
+.specimen__label { font-family: var(--font-display); font-size: .6875rem;
+  letter-spacing: .08em; text-transform: uppercase; margin: 0 0 var(--space-3); }
+.specimen__struck { font-family: var(--font-data); font-size: 1.375rem;
+  color: var(--rule-text); position: relative; width: max-content; margin: 0 0 var(--space-2); }
+.specimen__struck::after { content: ""; position: absolute; left: 0; right: 0; top: 52%;
+  height: 2px; background: var(--urgent); transform-origin: left center;
+  animation: strike 420ms 500ms ease-out both; }
+@keyframes strike { from { transform: scaleX(0);} to { transform: scaleX(1);} }
+.specimen__now { font-family: var(--font-data); font-variant-numeric: tabular-nums;
+  font-size: clamp(1.75rem, 4vw, 2.5rem); line-height: 1.05; color: var(--clear);
+  margin: 0 0 var(--space-3); white-space: nowrap; }
+.specimen__sub { font-family: var(--font-data); font-size: .8125rem;
+  color: var(--rule-text); margin: 0; }
+.specimen__prov { font-family: var(--font-data); font-size: .6875rem;
+  color: var(--rule-text); margin: var(--space-3) 0 0; padding-top: var(--space-3);
+  border-top: var(--hairline) solid var(--rule); }
+.specimen__prov a { color: var(--stamp); }
+.specimen__caption { font-family: var(--font-data); font-size: .6875rem;
+  color: var(--rule-text); margin: var(--space-3) 0 0; }
+
+/* ---------- proof strip ---------- */
+.proof { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--space-6);
+  padding: var(--space-6) 0; }
+.proof__n { font-family: var(--font-data); font-variant-numeric: tabular-nums;
+  font-size: clamp(1.375rem, 2.6vw, 1.875rem); line-height: 1; margin: 0 0 var(--space-2); }
+.proof__k { font-size: .8125rem; color: var(--rule-text); margin: 0; line-height: 1.4; }
+
+/* ---------- sections ---------- */
+section { padding: var(--space-8) 0; }
+h2 { font-family: var(--font-display); font-size: clamp(1.5rem, 3vw, 2.125rem);
+  line-height: 1.1; letter-spacing: -0.01em; margin: 0 0 var(--space-4); text-wrap: balance; }
+.lede { font-size: 1rem; line-height: 1.6; max-width: 60ch; margin: 0 0 var(--space-6); }
+
+.stack { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-6); }
+.stack__item { border-top: 2px solid var(--stamp); padding-top: var(--space-4); }
+.stack__name { font-family: var(--font-display); font-size: .8125rem; letter-spacing: .08em;
+  text-transform: uppercase; margin: 0 0 var(--space-2); }
+.stack__body { font-size: .9375rem; line-height: 1.55; margin: 0 0 var(--space-3); }
+.stack__fact { font-family: var(--font-data); font-size: .75rem; color: var(--rule-text);
+  margin: 0; }
+
+.rows { border-top: var(--hairline) solid var(--rule); }
+.row { display: grid; grid-template-columns: 12rem 1fr; gap: var(--space-6);
+  padding: var(--space-5) 0; border-bottom: var(--hairline) solid var(--rule); }
+.row__k { font-family: var(--font-data); font-size: .8125rem; color: var(--rule-text); margin: 0; }
+.row__v { margin: 0; font-size: .9375rem; line-height: 1.6; }
+.row__v code { font-family: var(--font-data); font-size: .8125rem; }
+
+.closing { border: var(--hairline) solid var(--rule); padding: var(--space-8);
+  text-align: left; }
+
+footer { padding: var(--space-6) 0 var(--space-8); font-family: var(--font-data);
+  font-size: .75rem; color: var(--rule-text); }
+footer a { color: var(--stamp); }
+
+@media (max-width: 60rem) {
+  .hero { grid-template-columns: 1fr; gap: var(--space-6); }
+  .stack { grid-template-columns: 1fr; }
+  .proof { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 30rem) {
+  .row { grid-template-columns: 1fr; gap: var(--space-2); }
+  .proof { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .specimen__struck::after { animation: none; transform: scaleX(1); }
+}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <nav class="nav">
+    <p class="nav__mark">Status Clock</p>
+    <div class="nav__spacer"></div>
+    <a href="#how">How it works</a>
+    <a href="#stack">Architecture</a>
+    <a href="https://github.com/lgoyal6/clickhouse_hack">Source</a>
+  </nav>
+</div>
+<hr class="hairline">
+
+<div class="wrap">
+  <header class="hero">
+    <div>
+      <p class="eyebrow">Immigration deadlines · with provenance</p>
+      <h1>Every number here tells you which rule set it, and the day that rule changed.</h1>
+      <p class="hero__lead">
+        Anyone on a US work or student visa is running countdowns they cannot see.
+        The rules move faster than the guidance about them: cap-gap shifted from
+        September 30 to April 1 in January 2025, and <strong>most published advice
+        still shows the old date</strong>.
+      </p>
+      <p class="hero__lead">
+        Status Clock computes your countdowns against versioned rules with effective
+        dates, so it can show you the exact moment the advice you were given stopped
+        being true.
+      </p>
+      <div class="cta-row">
+        <a class="btn btn--solid" href="/ui/">Open the Clock Wall</a>
+        <a class="btn" href="https://github.com/lgoyal6/clickhouse_hack">Read the source</a>
+      </div>
+      <p class="hero__note">Information, not legal advice.</p>
+    </div>
+
+    <figure class="specimen" style="margin:0">
+      <p class="specimen__tag">Real output · Maria O. · STEM OPT, cap-gap</p>
+      <p class="specimen__label">Cap-gap window</p>
+      <p class="specimen__struck">SEP 30 2026</p>
+      <p class="specimen__now">01 APR 2027</p>
+      <p class="specimen__sub">216 days remaining · 243-day window · 183 days gained</p>
+      <p class="specimen__prov">
+        <a href="https://www.federalregister.gov/documents/2024/12/18/2024-29354/modernizing-h-1b-requirements-providing-flexibility-in-the-f-1-program-and-program-improvements">H-1B Modernization Final Rule</a><br>
+        eff. 2025-01-17 · supersedes rule of 2008-04-08
+      </p>
+      <figcaption class="specimen__caption">
+        Thirteen weeks she would not have known she had. The citation lives inside
+        the card, never in a tooltip.
+      </figcaption>
+    </figure>
+  </header>
+</div>
+
+<hr class="hairline">
+<div class="wrap">
+  <div class="proof">
+    <div>
+      <p class="proof__n">1,396,903</p>
+      <p class="proof__k">Real DOL disclosure filings loaded, LCA and PERM, FY2024 and FY2025</p>
+    </div>
+    <div>
+      <p class="proof__n">462 days</p>
+      <p class="proof__k">Median certified PERM, measured. AC21 needs a filing pending 365</p>
+    </div>
+    <div>
+      <p class="proof__n">12 / 13</p>
+      <p class="proof__k">Rules checked against the primary source. The thirteenth shows a warning</p>
+    </div>
+    <div>
+      <p class="proof__n">107,344</p>
+      <p class="proof__k">Rows read to replay a rule change across 127.8M evaluations</p>
+    </div>
+  </div>
+</div>
+<hr class="hairline">
+
+<div class="wrap">
+  <section id="how">
+    <p class="eyebrow">What it does</p>
+    <h2>A calculator gives you a number. This tells you where the number came from.</h2>
+    <p class="lede">
+      Rules are stored as versions with effective dates and a chain of what each one
+      superseded. That single decision is what makes the rest possible.
+    </p>
+
+    <div class="rows">
+      <div class="row">
+        <p class="row__k">Seven countdowns</p>
+        <p class="row__v">
+          Unemployment days, cap-gap, H-1B grace, the AC21 365-day threshold, I-485
+          portability, the six-year maximum, and the OPT filing window. Each one
+          declares whether it applies to you at all.
+        </p>
+      </div>
+      <div class="row">
+        <p class="row__k">Nothing shows zero</p>
+        <p class="row__v">
+          A clock that has not started says so and says why. <em>Not in H-1B status,
+          so the six-year meter has not begun</em> is an answer. Zero is a lie that
+          looks like one.
+        </p>
+      </div>
+      <div class="row">
+        <p class="row__k">Derived is labelled</p>
+        <p class="row__v">
+          Some numbers are stated in a regulation. Others are our arithmetic over one.
+          The AC21 card says which it is and shows the working.
+        </p>
+      </div>
+      <div class="row">
+        <p class="row__k">Unverified is visible</p>
+        <p class="row__v">
+          One rule in the table has a citation we could not stand behind, so it
+          renders a warning band on the screen it governs. We left it there on
+          purpose.
+        </p>
+      </div>
+      <div class="row">
+        <p class="row__k">English, Español, हिन्दी</p>
+        <p class="row__v">
+          The people most exposed to these deadlines are disproportionately not
+          reading English regulations. The engine returns codes, never sentences, so
+          every explanation translates without losing its citation.
+        </p>
+      </div>
+    </div>
+  </section>
+</div>
+
+<hr class="hairline">
+<div class="wrap">
+  <section id="stack">
+    <p class="eyebrow">Architecture</p>
+    <h2>Three systems, each doing the one thing the others cannot.</h2>
+    <p class="lede">
+      Not three logos on a slide. Remove any one and a specific capability disappears.
+    </p>
+
+    <div class="stack">
+      <div class="stack__item">
+        <p class="stack__name">Postgres</p>
+        <p class="stack__body">
+          Holds the person and refuses to let their history become incoherent. A
+          layer-scoped exclusion constraint makes two simultaneous primary statuses
+          physically impossible while still allowing cap-gap to stack on OPT, which
+          is what the law actually does. Row-level security means a query cannot see
+          another person's record even if the SQL forgets a WHERE clause.
+        </p>
+        <p class="stack__fact">13 versioned rules · unbroken supersedes chain · RLS enforced</p>
+      </div>
+      <div class="stack__item">
+        <p class="stack__name">ClickHouse</p>
+        <p class="stack__body">
+          Holds 1.4M real DOL filings and every evaluation ever made. That history is
+          what lets the product say not just where you stand but how you got here,
+          and replay a proposed rule change across the whole population to find
+          everyone whose answer would move.
+        </p>
+        <p class="stack__fact">127.8M evaluations · 20.6× compression · replay reads 0.08% of the table</p>
+      </div>
+      <div class="stack__item">
+        <p class="stack__name">LibreChat</p>
+        <p class="stack__body">
+          The hardest problem is not display, it is getting accurate dates out of a
+          frightened person who does not know the vocabulary. That is a conversation,
+          not a form. Provenance is required by the tool schemas, so the agent cannot
+          receive an uncited number and has nothing uncited to repeat.
+        </p>
+        <p class="stack__fact">2 MCP servers · 9 tools · citation required by schema, not by prompt</p>
+      </div>
+    </div>
+  </section>
+</div>
+
+<hr class="hairline">
+<div class="wrap">
+  <section>
+    <div class="closing">
+      <p class="eyebrow">What we will not do</p>
+      <h2 style="margin-bottom:var(--space-4)">Invent a number to fill a gap.</h2>
+      <p class="lede" style="margin-bottom:var(--space-6)">
+        The corpus covers H-1B labour condition applications, which skew heavily
+        technical. Ask it about a home health aide and it finds three filings, so it
+        refuses to compute a percentile and says why. A confident answer over three
+        rows is not a percentile with a caveat. It is noise with a decimal point, and
+        this is the one product that cannot afford to ship one.
+      </p>
+      <div class="cta-row" style="margin-top:0">
+        <a class="btn btn--solid" href="/ui/">Open the Clock Wall</a>
+        <a class="btn" href="/ui/ask.html">Ask a question</a>
+      </div>
+    </div>
+  </section>
+</div>
+
+<hr class="hairline">
+<div class="wrap">
+  <footer>
+    Built for the ClickHouse × Postgres hackathon, KOHO SF ·
+    <a href="https://github.com/lgoyal6/clickhouse_hack">github.com/lgoyal6/clickhouse_hack</a><br>
+    Data from the US Department of Labor Office of Foreign Labor Certification.
+    Rule citations from the Federal Register, 8 CFR, INA and ICE SEVP guidance.<br>
+    This is information, not legal advice.
+  </footer>
+</div>
+
+</body>
+</html>
