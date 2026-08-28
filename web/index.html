@@ -29,6 +29,16 @@
       text-transform: uppercase; color: var(--rule-text); text-decoration: none;
       padding-bottom: var(--space-2); border-bottom: 2px solid transparent; }
   .topnav a[aria-current="page"] { color: var(--ink); border-color: var(--stamp); }
+  .persona button { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+  .persona button .persona__name { font-family: var(--font-body); font-size: .8125rem; font-weight: 600; }
+  .persona button .persona__role { color: var(--rule-text); }
+  .persona button[aria-pressed="true"] .persona__role { color: var(--stamp); }
+  main#wall { max-width: 68rem; }
+  .clock-group__title { font-family: var(--font-display); font-size: .75rem;
+      letter-spacing: .08em; text-transform: uppercase; margin: var(--space-6) 0 0;
+      padding: 0 var(--space-4); color: var(--ink); }
+  .clock-group[data-group="attention"] .clock-group__title { color: var(--urgent); }
+  .clock-group:first-of-type .clock-group__title { margin-top: var(--space-4); }
 </style>
 </head>
 <body>
@@ -46,11 +56,15 @@
 <!-- Persona switching is two sessions, not two user ids. The API has no route that
      accepts a user id; see contracts/openapi.yaml and docs/REVIEW.md D1. -->
 <nav class="persona" aria-label="Demo session">
-  <button data-session="sess_maria" aria-pressed="true">sess_maria</button>
-  <button data-session="sess_daniel" aria-pressed="false">sess_daniel</button>
+  <button data-session="sess_maria" aria-pressed="true">
+    <span class="persona__name">Maria</span><span class="persona__role">STEM OPT worker</span>
+  </button>
+  <button data-session="sess_daniel" aria-pressed="false">
+    <span class="persona__name">Daniel</span><span class="persona__role">H-1B worker</span>
+  </button>
 </nav>
 
-<main class="clock-wall" id="wall"></main>
+<main id="wall"></main>
 
 <section class="notrunning" id="notrunning" hidden>
   <h2>Not running yet</h2>
@@ -112,6 +126,10 @@ function subline(c) {
   return `by ${fmtDate(c.window_end)}`;
 }
 
+// Plain-language status, spoken and read before the raw severity token. A
+// reader who has never seen "critical/warn/clear" before still knows what to do.
+const STATUS_LABEL = { critical: 'Needs attention now', warn: 'Watch this one', clear: 'On track' };
+
 function card(c) {
   const el = document.createElement('article');
   el.className = `field-card field-card--${c.severity}`;
@@ -121,15 +139,29 @@ function card(c) {
   // See docs/REVIEW.md F4.
   el.setAttribute('role', 'group');
   el.setAttribute('aria-label',
-    `${c.label}. ${headline(c)}. ${subline(c)}. ` +
+    `${c.label}. ${STATUS_LABEL[c.severity] ? STATUS_LABEL[c.severity] + '. ' : ''}` +
+    `${headline(c)}. ${subline(c)}. ` +
     `Governed by ${c.provenance.citation}, ${c.provenance.authority}, ` +
     `effective ${c.provenance.effective_from}.` +
     (c.provenance.verified ? '' : ' This rule is unverified.'));
 
+  const eyebrowRow = document.createElement('div');
+  eyebrowRow.className = 'field-card__eyebrow-row';
+
   const eyebrow = document.createElement('p');
   eyebrow.className = 'field-card__eyebrow';
   eyebrow.textContent = c.label;
-  el.append(eyebrow);
+  eyebrowRow.append(eyebrow);
+
+  if (STATUS_LABEL[c.severity]) {
+    const status = Object.assign(document.createElement('span'), {
+      className: `field-card__status field-card__status--${c.severity}`,
+      textContent: STATUS_LABEL[c.severity],
+    });
+    status.setAttribute('aria-hidden', 'true');
+    eyebrowRow.append(status);
+  }
+  el.append(eyebrowRow);
 
   if (c.superseded) {
     const prior = document.createElement('p');
@@ -210,12 +242,33 @@ async function render(session) {
     `As of ${fmtDate(data.as_of)} · ${running.length} clocks · ` +
     `${data.needs_attention} needs attention`;
 
+  // Grouped by urgency, not just color-coded within one list, so a reader can
+  // act on "what needs me now" before scanning everything else.
+  const attention = running.filter(c => c.severity === 'critical' || c.severity === 'warn');
+  const onTrack = running.filter(c => c.severity !== 'critical' && c.severity !== 'warn');
+
   const wall = document.getElementById('wall');
   wall.replaceChildren();
-  for (const c of running) {
-    const el = card(c);
-    wall.append(el);
-    tick(el.querySelector('.field-card__count'), headline(c));
+  for (const [group, title, items] of [
+    ['attention', 'Needs your attention', attention],
+    ['ontrack', 'On track', onTrack],
+  ]) {
+    if (items.length === 0) continue;
+    const section = document.createElement('section');
+    section.className = 'clock-group';
+    section.dataset.group = group;
+    section.append(Object.assign(document.createElement('h2'), {
+      className: 'clock-group__title', textContent: title,
+    }));
+    const grid = document.createElement('div');
+    grid.className = 'clock-wall';
+    section.append(grid);
+    wall.append(section);
+    for (const c of items) {
+      const el = card(c);
+      grid.append(el);
+      tick(el.querySelector('.field-card__count'), headline(c));
+    }
   }
 
   // Clocks that are not applicable get a quiet secondary row with the reason,

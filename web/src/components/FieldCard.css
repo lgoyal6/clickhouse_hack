@@ -15,6 +15,13 @@
   gap: var(--space-2);
 }
 
+.field-card__eyebrow-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
 .field-card__eyebrow {
   font-family: var(--font-display);
   font-size: 0.6875rem;              /* 11px */
@@ -22,6 +29,22 @@
   text-transform: uppercase;
   color: var(--ink);
 }
+
+/* Plain-language status, read at a glance without decoding the count or the
+ * severity color alone. Bordered, not a filled/rounded pill, to stay in the
+ * card's document register rather than reading as a generic dashboard chip. */
+.field-card__status {
+  font-family: var(--font-body);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  white-space: nowrap;
+  border: var(--hairline) solid currentColor;
+  padding: 1px var(--space-2);
+}
+
+.field-card__status--critical { color: var(--urgent); }
+.field-card__status--warn     { color: var(--amber-hairline); }
+.field-card__status--clear    { color: var(--clear-text); }
 
 /* Every count. Tabular figures hold width so the tick animation cannot reflow. */
 .field-card__count {
