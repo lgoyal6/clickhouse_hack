@@ -20,13 +20,24 @@ not polish items; they are the two beats you are going to stand up and show.
 
 Findings are ordered by what breaks first.
 
-**Verification status of this review.** Contrast ratios (§F), all date arithmetic
-(§A2, §F3), and the rule-resolution logic traced by hand (§A2) were computed and are
-reported as verified. The two ClickHouse runtime behaviours in §A5 and §A7 could
-**not** be executed locally (no ClickHouse and no running Docker daemon on this
-machine), so they are flagged as *verify before building* rather than confirmed. Every
-item in §E is a claim about primary legal sources and none of it is verified here;
-that is the team's job and the spec already says so.
+**Verification status of this review.** Contrast ratios (§F) and all date arithmetic
+(§A2, §F3) were computed and are verified.
+
+§A1, §A3, §A7 and §A8 have since been **executed** against Postgres 17 and ClickHouse
+26.7.5 on `track/data`, and the numbers are in `TRACK_DATA.md`: the spec's replay
+query returns zero rows where the corrected one returns both affected users; the
+layer-scoped exclusion constraint accepts cap-gap overlapping OPT and still rejects a
+second overlapping primary status; a pending PERM case stores **45,447** days under
+the spec's `UInt16` column; a `$150,000/hour` typo becomes **$312,000,000** in the
+wage distribution under the spec's `multiIf`.
+
+§A5 is **partly resolved**: the materialized views create and populate with their
+source expressions inlined, which was the recommendation. Whether the spec's original
+form referencing `MATERIALIZED` columns would also have worked was not tested, because
+inlining costs nothing and the question stopped mattering.
+
+Every item in §E is a claim about primary legal sources and none of it is verified
+here. That is the team's job and the spec already says so.
 
 ---
 
