@@ -1,0 +1,46 @@
+# Person A's stack. Independent of infra/chat.compose.yml by design: the two never
+# share a file, a network, or a volume. Person B reaches this over the host.
+#
+#   docker compose -f infra/data.compose.yml up -d
+
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: status_clock
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-devonly}
+      # Logical replication, so CDC has a chance of working without a restart later.
+      # Timebox PeerDB hard and have a fallback ready; see docs/REVIEW.md C6.
+      POSTGRES_INITDB_ARGS: "-c wal_level=logical"
+    command:
+      - postgres
+      - -c
+      - wal_level=logical
+      - -c
+      - max_replication_slots=4
+      - -c
+      - max_wal_senders=4
+    ports: ["5432:5432"]
+    volumes:
+      - ./pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d status_clock"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-devonly}
+    ports: ["8123:8123", "9000:9000"]
+    volumes:
+      - ./clickhouse-data:/var/lib/clickhouse
+    ulimits:
+      nofile: { soft: 262144, hard: 262144 }
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
