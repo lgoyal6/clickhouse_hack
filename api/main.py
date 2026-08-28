@@ -151,6 +151,14 @@ def get_my_clocks(
 
     lang = locale or state.locale
     out = [serialise(c, lang) for c in clocks]
+
+    # Corpus context for the one clock where the statute's number and the real-world
+    # number differ enough to change what someone should do.
+    for c in out:
+        if c["clock_key"] == "ac21_365" and c["applicable"]:
+            ctx = perm_context()
+            if ctx:
+                c["corpus_context"] = ctx
     running = [c for c in out if c["applicable"]]
 
     return {
@@ -296,10 +304,52 @@ def check_claim(body: dict):
     return payload
 
 
-CORPUS_COVERAGE = "DOL OFLC LCA disclosure, FY2024 Q4 and FY2025 Q4, CERTIFIED only"
+CORPUS_COVERAGE = "DOL OFLC LCA disclosure, FY2024 and FY2025 (all quarters), CERTIFIED only"
+
+# Below this, refuse outright rather than flag. A percentile over three filings is not
+# a percentile with a caveat, it is noise with a decimal point. Between the floor and
+# 30 the number is returned with insufficient_data set, because there the shape is
+# real even if the precision is not. See docs/REVIEW.md C8.
+MIN_FOR_PERCENTILE = 10
+SMALL_SAMPLE = 30
 
 PERCENTILE_SQL = (REPO / "clickhouse" / "queries" / "wage_percentile.sql").read_text()
 LEVEL_SQL = (REPO / "clickhouse" / "queries" / "wage_level.sql").read_text()
+PERM_SQL = (REPO / "clickhouse" / "queries" / "perm_timeline.sql").read_text()
+
+
+def perm_context(fy: int = 2025) -> dict | None:
+    """How long PERM actually takes, from the corpus.
+
+    Attached to ac21_365 because the clock alone is a true number that omits the part
+    that matters. AC21 needs a filing PENDING 365 days, so the clock derives a filing
+    deadline of six-year-mark minus 365. The corpus says the median certified PERM
+    runs 462 days end to end. Someone who files exactly at the derived deadline
+    satisfies the statute with zero margin.
+
+    Returns None rather than guessing if the corpus is not loaded.
+    """
+    try:
+        rows, _ = ch.query(_sql(PERM_SQL), {"fy": fy})
+    except (ch.ClickHouseError, RuntimeError):
+        return None
+    if not rows or not int(rows[0].get("n") or 0):
+        return None
+    r = rows[0]
+    return {
+        "median_days": int(r["median_days"]),
+        "p90_days": int(r["p90_days"]),
+        "n_filings": int(r["n"]),
+        "source": {"dataset": "DOL OFLC PERM Disclosure Data",
+                   "coverage": f"FY{fy}, CERTIFIED only", "retrieved_at": "2026-08-28"},
+        "note": (
+            f"The median certified PERM took {int(r['median_days'])} days end to end "
+            f"across {int(r['n']):,} filings, and {int(r['p90_days'])} days at the 90th "
+            f"percentile. The 365 days in AC21 is how long a filing must have been "
+            f"PENDING, not how long the process takes. Filing at this deadline leaves "
+            f"no margin."
+        ),
+    }
 
 
 def _sql(text: str) -> str:
@@ -346,7 +396,7 @@ def wage_percentile(soc_code: str, state: str, wage: float,
     # the query creates an alias that WHERE then resolves against, which silently
     # removes the filter. See the header of wage_percentile.sql.
 
-    if n == 0:
+    if n < MIN_FOR_PERCENTILE:
         # An empty result is an answer, and it must not look like a working query.
         # Home health aides have single-digit filings in the entire corpus: the LCA
         # corpus covers H-1B occupations, which are overwhelmingly technical. Saying
@@ -354,14 +404,17 @@ def wage_percentile(soc_code: str, state: str, wage: float,
         return {
             "soc_code": soc, "soc_title": None, "state": state.upper(),
             "fiscal_year": fy, "wage": wage,
-            "percentile": None, "n_filings": 0,
+            "percentile": None, "n_filings": n,
             "quantiles": None, "wage_level": None, "next_level_wage": None,
             "insufficient_data": True,
             "message": (
-                f"No certified LCA filings for {soc} in {state.upper()} in FY{fy}. "
-                f"This corpus covers H-1B labour condition applications, which are "
-                f"concentrated in technical occupations. A percentile cannot be "
-                f"computed and will not be estimated."
+                (f"No certified LCA filings for {soc} in {state.upper()} in FY{fy}."
+                 if n == 0 else
+                 f"Only {n} certified LCA filing(s) for {soc} in {state.upper()} in "
+                 f"FY{fy}, below the floor of {MIN_FOR_PERCENTILE}.")
+                + " This corpus covers H-1B labour condition applications, which are "
+                  "concentrated in technical occupations. A percentile cannot be "
+                  "computed and will not be estimated."
             ),
             "source": {"dataset": "DOL OFLC LCA Disclosure Data",
                        "coverage": CORPUS_COVERAGE, "retrieved_at": "2026-08-28"},
@@ -400,14 +453,15 @@ def wage_percentile(soc_code: str, state: str, wage: float,
              "prevailing_median": float(l["prevailing_median"])}
             for l in levels
         ],
-        "insufficient_data": n < 30,
+        "insufficient_data": n < SMALL_SAMPLE,
         "message": (
             f"Percentile computed over {n:,} certified filings. This is where the "
             f"offer sits among peer filings; it is not a selection probability. The "
             f"wage-weighted mechanism is understood to weight by OES wage level, "
             f"which is the level_bands field."
-            + ("" if n >= 30 else " Fewer than 30 filings: treat this percentile as "
-                                  "indicative only.")
+            + ("" if n >= SMALL_SAMPLE else
+               f" Fewer than {SMALL_SAMPLE} filings: treat this percentile as "
+               f"indicative only.")
         ),
         "source": {"dataset": "DOL OFLC LCA Disclosure Data",
                    "coverage": CORPUS_COVERAGE, "retrieved_at": "2026-08-28"},

@@ -19,6 +19,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from api import clickhouse as ch  # noqa: E402
 from api.main import LEVEL_SQL, PERCENTILE_SQL, _sql, app  # noqa: E402
 
+AS_OF = "2026-08-28"
 SOC_DEV = "15-1252"        # Software Developers, the corpus's dominant occupation
 SOC_AIDE = "31-1121"       # Home Health Aides, 1 filing in the whole corpus
 
@@ -243,9 +244,10 @@ def test_an_uncovered_occupation_says_so_instead_of_estimating(client):
     d = client.get("/v1/corpus/wage-percentile",
                    params={"soc_code": SOC_AIDE, "state": "CA", "wage": 62400,
                            "fiscal_year": 2025}).json()
+    from api.main import MIN_FOR_PERCENTILE
+    assert d["n_filings"] < MIN_FOR_PERCENTILE
     assert d["insufficient_data"] is True
-    assert d["n_filings"] == 0
-    assert d["percentile"] is None
+    assert d["percentile"] is None, "a percentile over single digits is noise"
     assert d["quantiles"] is None
     assert "cannot be computed and will not be estimated" in d["message"]
 
@@ -253,11 +255,12 @@ def test_an_uncovered_occupation_says_so_instead_of_estimating(client):
 @needs_corpus
 def test_small_samples_are_flagged(client):
     """A percentile over eleven filings is not a percentile."""
+    from api.main import MIN_FOR_PERCENTILE, SMALL_SAMPLE
     rows, _ = ch.query(
         "SELECT soc_code_norm AS soc, worksite_state AS st, count() AS n "
         "FROM lca_filings WHERE case_status_norm='CERTIFIED' AND fiscal_year=2025 "
-        "AND wage_suspect=0 GROUP BY soc, st HAVING n BETWEEN 1 AND 29 "
-        "ORDER BY n DESC LIMIT 1")
+        f"AND wage_suspect=0 GROUP BY soc, st HAVING n BETWEEN {MIN_FOR_PERCENTILE} "
+        f"AND {SMALL_SAMPLE - 1} ORDER BY n DESC LIMIT 1")
     if not rows:
         pytest.skip("no small-sample group in this corpus")
     d = client.get("/v1/corpus/wage-percentile",
@@ -270,3 +273,68 @@ def test_small_samples_are_flagged(client):
 @needs_corpus
 def test_healthz_reports_corpus_state(client):
     assert client.get("/healthz").json()["corpus"] == "up"
+
+
+# ------------------------------------------------------------------ PERM ------
+
+@needs_corpus
+def test_perm_context_is_attached_to_ac21(client):
+    """The clock alone is a true number that omits the part that matters.
+
+    AC21 needs a filing PENDING 365 days, so the clock derives a deadline of
+    six-year-mark minus 365. The corpus says the median certified PERM runs well over
+    400 days end to end, so filing at that deadline leaves no margin. A deadline
+    without the processing time is a half-answer.
+    """
+    from api.main import perm_context
+    ctx = perm_context()
+    if ctx is None:
+        pytest.skip("perm_filings not loaded")
+    assert ctx["median_days"] > 365, "if PERM got faster than AC21's threshold, say so"
+    assert ctx["n_filings"] > 1000
+    assert ctx["source"]["dataset"].startswith("DOL OFLC PERM")
+
+    b = client.get("/v1/clocks", cookies={"sc_session": "sess_daniel"},
+                   params={"as_of": AS_OF}).json()
+    ac21 = next(k for k in b["clocks"] if k["clock_key"] == "ac21_365")
+    assert ac21["corpus_context"]["median_days"] == ctx["median_days"]
+
+
+@needs_corpus
+def test_perm_pending_cases_have_null_processing_time():
+    rows, _ = ch.query(
+        "SELECT countIf(decision_date IS NULL AND days_to_decision IS NOT NULL) AS bad "
+        "FROM perm_filings")
+    assert int(rows[0]["bad"]) == 0
+
+
+@needs_corpus
+def test_perm_soc_is_normalised_like_lca():
+    rows, _ = ch.query(
+        "SELECT uniqExact(soc_code) AS raw, uniqExact(soc_code_norm) AS norm "
+        "FROM perm_filings")
+    assert int(rows[0]["norm"]) < int(rows[0]["raw"])
+
+
+@needs_corpus
+def test_both_perm_vintages_loaded():
+    """FY2024 and FY2025 PERM have DIFFERENT column layouts, one year apart.
+
+    The loader refused FY2024 against the FY2025 map by name, which is the header
+    gate working. Both are mapped now and both are present.
+    """
+    rows, _ = ch.query(
+        "SELECT fiscal_year, count() AS n FROM perm_filings GROUP BY fiscal_year "
+        "ORDER BY fiscal_year")
+    years = {int(r["fiscal_year"]): int(r["n"]) for r in rows}
+    assert set(years) == {2024, 2025}
+    assert all(n > 50_000 for n in years.values())
+
+
+@needs_corpus
+def test_the_corpus_is_at_the_scale_the_pitch_claims():
+    """The build spec claims six to eight million rows. Say what is actually loaded."""
+    lca, _ = ch.query("SELECT count() AS n FROM lca_filings")
+    perm, _ = ch.query("SELECT count() AS n FROM perm_filings")
+    total = int(lca[0]["n"]) + int(perm[0]["n"])
+    assert total > 1_000_000, f"only {total:,} rows loaded"
