@@ -23,18 +23,23 @@ Findings are ordered by what breaks first.
 **Verification status of this review.** Contrast ratios (§F) and all date arithmetic
 (§A2, §F3) were computed and are verified.
 
-§A1, §A3, §A7 and §A8 have since been **executed** against Postgres 17 and ClickHouse
-26.7.5 on `track/data`, and the numbers are in `TRACK_DATA.md`: the spec's replay
-query returns zero rows where the corrected one returns both affected users; the
-layer-scoped exclusion constraint accepts cap-gap overlapping OPT and still rejects a
-second overlapping primary status; a pending PERM case stores **45,447** days under
-the spec's `UInt16` column; a `$150,000/hour` typo becomes **$312,000,000** in the
-wage distribution under the spec's `multiIf`.
+§A1, §A3, §A7 and §A8 have been **executed** against Postgres 17 and ClickHouse
+26.7.5, and the numbers are in `TRACK_DATA.md`: the spec's replay query returns zero
+rows where the corrected one returns both affected users; the layer-scoped exclusion
+constraint accepts cap-gap overlapping OPT and still rejects a second overlapping
+primary status; a pending PERM case stores **45,447** days under the spec's `UInt16`
+column; a `$150,000/hour` typo becomes **$312,000,000** under the spec's `multiIf`.
 
-§A5 is **partly resolved**: the materialized views create and populate with their
-source expressions inlined, which was the recommendation. Whether the spec's original
-form referencing `MATERIALIZED` columns would also have worked was not tested, because
-inlining costs nothing and the question stopped mattering.
+§C has been **rewritten against the real corpus**. 239,477 rows of DOL OFLC LCA
+disclosure data for FY2024 Q4 and FY2025 Q4 are loaded. C1 is confirmed with the
+actual 98-column layout; **C2 was wrong** and is corrected; C3 is confirmed; and
+C8 through C12 are new findings that only loading the data could produce, including
+two silent-wrong bugs that would each have shipped a confident number computed over
+the wrong rows.
+
+§A5 is **partly resolved**: the views create and populate with their source
+expressions inlined, which was the recommendation. Whether the spec's original form
+would also have worked was not tested, because inlining costs nothing.
 
 Every item in §E is a claim about primary legal sources and none of it is verified
 here. That is the team's job and the spec already says so.
@@ -432,24 +437,30 @@ Budget for a per-fiscal-year column mapping layer and a canonical target schema,
 convert once to Parquet so reloads are fast. This is where the day goes if you do
 not plan it.
 
-### C2. `employer_fein` is load-bearing and may not exist in the source
+### C2. `employer_fein` exists after all — RESOLVED, and I was wrong
 
-`lca_filings.ORDER BY` ends with it, `employer_profiles` is keyed entirely on it, and
-`employment_episodes.employer_fein` is described as "join key into the OFLC corpus."
-Recent LCA and PERM public disclosure files do not reliably publish FEIN. If the
-column is absent or mostly empty, `employer_profiles` degenerates to a single bucket
-and the employer tool returns garbage.
+This finding said FEIN might be absent from recent LCA and PERM disclosure files and
+that keying `employer_profiles` on it was therefore risky.
 
-Check the actual headers before writing any of this. If FEIN is not there, key on a
-normalised employer name with an explicit `employer_id` resolution table, surface the
-match confidence as §9 already promises, and let the user correct it. Do not let a
-column that may not exist sit in a primary key.
+**Checked against the real files.** `EMPLOYER_FEIN` is present in both FY2024 Q4 and
+FY2025 Q4, at column index 30 of 98, and it is **100% populated** in all 239,477 rows
+loaded. The concern was unfounded.
 
-### C3. `worksite_msa` availability varies
+`employer_profiles` still keys on a normalised employer name, because name-based
+matching is what a user's free-text employer input needs and FEIN is now carried
+alongside as the exact join key. Keeping both is the right answer, but the reason is
+convenience rather than the absence the finding claimed.
 
-Present in some years, derived in others, absent in others. The Standing screen is
-specified as "occupation and state," so make state the contract and treat MSA as
-optional enrichment.
+### C3. `worksite_msa` does not exist in the source — CONFIRMED
+
+Checked against the real files. There is no MSA column at all. The 98 columns include
+`WORKSITE_CITY`, `WORKSITE_COUNTY`, `WORKSITE_STATE`, `WORKSITE_POSTAL_CODE` and a
+`PW_TRACKING_NUMBER`, and nothing else geographic. The build spec's
+`worksite_msa String` would have loaded empty for every row.
+
+State is the contract. County is carried as optional enrichment. Any metro-level claim
+would have to be derived from postal code or county, which is a separate piece of work
+and not one the Standing screen needs.
 
 ### C4. `fiscal_year` means "the year of the file," not the year of the case
 
@@ -488,6 +499,109 @@ dedup) or they see multiple versions of a row, and deletes need an `is_deleted`
 column with `ReplacingMergeTree(version, is_deleted)`. The Postgres schema uses
 `ON DELETE CASCADE`, so deletes will happen, and a deleted user reappearing in a
 population risk count is a bad look for a product about correctness.
+
+### C8. The corpus cannot answer the demo persona's question
+
+The LCA corpus is H-1B labour condition applications, and those are overwhelmingly
+technical occupations. Measured over 216,775 certified filings across FY2024 and
+FY2025:
+
+| SOC | Occupation | Certified filings |
+|---|---|---|
+| 15-1252 | Software Developers | 70,100 |
+| 15-1299 | Computer Systems Engineers/Architects | 22,985 |
+| 15-2051 | Data Scientists | 10,419 |
+| **31-1121** | **Home Health Aides** | **1** |
+
+§8 of the build spec says: "Ask the agent whether her wage clears the bar. It hits
+ClickHouse, returns her percentile against millions of certified filings for her
+occupation and state." For a home health aide there is **one** filing nationally.
+There is no distribution, and there is no honest percentile.
+
+Two things follow, and they pull in opposite directions.
+
+The **product** answer is that the API must say so rather than estimate, and it now
+does: `insufficient_data: true`, `percentile: null`, and a message naming the reason.
+An invented percentile in this product is the precise harm it exists to prevent, and
+an empty result that looks like a working query is worse than an error.
+
+The **pitch** answer is harder. The persona choice in §9 is defended on the grounds
+that "the same clocks govern home health aides, hotel workers, and adjuncts." That is
+true of the *clocks*, and the clocks are the product. It is not true of the *corpus*.
+So either the Standing screen is demoed with a persona the corpus covers, or it is
+demoed as the honest refusal, which is a defensible and even strong choice. What
+cannot happen is the §8 script as written, because it promises a number that does not
+exist. Decide which before the demo, not during it.
+
+### C9. `case_status` is `'Certified'`, not `'CERTIFIED'`
+
+Every filter in the build spec, and in the first draft of the ClickHouse DDL written
+against it, compares `case_status = 'CERTIFIED'`. The source value is `Certified`.
+The comparison matches **zero rows**.
+
+That means every materialized view would have been empty, the Standing screen would
+have shown nothing, and no error would have been raised anywhere. This is the single
+most dangerous shape of bug this product can have: not a wrong number, but an empty
+result indistinguishable from a working query over a population with no matches.
+
+Fixed with a `case_status_norm` materialized column, normalised once at write time,
+and a data-quality check that reports every distinct spelling so a future change in
+the source is visible rather than silent.
+
+Related scope decision, now explicit: only `CERTIFIED` is included. `CERTIFIED -
+WITHDRAWN` accounts for another 17,395 rows and was certified by DOL before being
+withdrawn, so the wage was offered but the job may not have happened. The quality
+query reports the excluded count so the choice stays reversible.
+
+### C10. SOC codes appear in two spellings, and one of them is 1% of the data
+
+The corpus carries both `15-1252.00` (O\*NET detail code) and bare `15-1252`:
+
+```
+with .XX suffix : 236,886 rows across 623 codes
+bare            :   2,591 rows across 189 codes
+Software Developers: 74,504 as '15-1252.00' vs 547 as '15-1252'
+```
+
+Querying either spelling alone returns a confident percentile computed over a
+fraction of the occupation. Before normalising, a query for Software Developers in
+California returned **n=29**. After, **n=5,991** for a single fiscal year.
+
+Normalisation has to happen on **both sides**: a `soc_code_norm` column, and the
+caller's input, because a user or an agent passing `15-1252.00` against a normalised
+column returns nothing at all.
+
+### C11. `PW_UNIT_OF_PAY` is a separate column, and the spec has no place for it
+
+The prevailing wage carries its own unit of pay, distinct from the offered wage's
+unit, and the two genuinely differ on real rows. The build spec's `lca_filings` has
+`prevailing_wage` and no `pw_unit`, so any comparison of offered wage to prevailing
+wage compares an annualised figure against an hourly one.
+
+This matters specifically for finding B10. The wage *level* question needs the
+prevailing wage annualised on its own terms, and without it the Standing screen's
+level determination is wrong by a factor of about 2,080.
+
+### C12. ClickHouse resolves SELECT aliases inside WHERE, and it cost three bugs
+
+Not a spec finding; a property of the engine that bit this project three times, worth
+recording because the failures were all silent.
+
+1. `anyState(employer_name) AS employer_name` — the `employer_key` expression then
+   resolved against an `AggregateFunction` and the view refused to create. Loud.
+2. `round(quantileMerge(0.50)(pw_median)) AS pw_median` — the next expression
+   referencing `pw_median` resolved against the aliased `Decimal`. Loud.
+3. `{fy:UInt16} AS fiscal_year` in a SELECT list, with `WHERE fiscal_year =
+   {fy:UInt16}` below it — the predicate compared the parameter to itself, was always
+   true, and the fiscal-year filter **vanished**. Both years returned an identical 51
+   rows while each response labelled itself a single year. **Silent**, and the
+   percentile was computed over twice the data it claimed.
+
+The third is the dangerous one and it is the one a reviewer would never spot by
+reading. The rule that prevents all three: never alias anything to a name that is
+also a column in the `FROM` clause, and never echo a request parameter back out of
+SQL. `api/tests/test_corpus.py` enforces both, the second with a check that scans
+every query file.
 
 ---
 
