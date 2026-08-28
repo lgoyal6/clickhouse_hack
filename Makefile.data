@@ -6,7 +6,7 @@ SHELL := /bin/bash
 PG    := postgresql://postgres:$${POSTGRES_PASSWORD:-devonly}@localhost:5432/status_clock
 CH    := clickhouse client --host localhost --password $${CLICKHOUSE_PASSWORD:-devonly}
 
-.PHONY: help deps up down migrate seed ch-ddl quality test itest api verify reset demo
+.PHONY: help deps up down migrate seed ch-ddl fetch convert load corpus quality test itest api verify reset demo
 
 help:
 	@grep -E '^[a-z-]+:.*?##' $(MAKEFILE_LIST) | sed 's/:.*##/\t/' | column -t -s $$'\t'
@@ -28,6 +28,27 @@ seed:          ## seed rule param shapes and rules
 
 ch-ddl:        ## apply ClickHouse DDL. ORDER MATTERS: views before data. REVIEW A5.
 	@for f in clickhouse/ddl/0*.sql; do echo "== $$f"; $(CH) --multiquery < "$$f" || exit 1; done
+
+FY ?= 2025
+DOL := https://www.dol.gov/sites/dolgov/files/ETA/oflc/pdfs
+LCA := LCA_Disclosure_Data_FY$(FY)_Q4
+
+fetch:         ## download one LCA disclosure file. FY=2025 by default.
+	@mkdir -p data
+	curl -fSL -o data/$(LCA).xlsx $(DOL)/$(LCA).xlsx
+	python -m ingest.headers data/$(LCA).xlsx | tail -5
+
+convert:       ## xlsx -> csv, once. FY=2025 by default.
+	python -m ingest.convert data/$(LCA).xlsx
+
+load:          ## load one converted file. Needs ch-ddl first. FY=2025 by default.
+	python -m ingest.load --fiscal-year $(FY) --dry-run data/$(LCA).csv
+	python -m ingest.load --fiscal-year $(FY) data/$(LCA).csv
+
+corpus:        ## fetch + convert + load two fiscal years, then gate
+	$(MAKE) -f Makefile.data fetch convert load FY=2024
+	$(MAKE) -f Makefile.data fetch convert load FY=2025
+	$(MAKE) -f Makefile.data quality
 
 quality:       ## data quality gates. Must pass before trusting any corpus query.
 	$(CH) --multiquery < clickhouse/queries/data_quality.sql

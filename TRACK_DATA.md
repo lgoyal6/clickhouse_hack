@@ -7,9 +7,13 @@ You own `db/`, `clickhouse/`, `engine/`, `ingest/`, `api/`, `infra/data.compose.
 
 ```bash
 make -f Makefile.data deps up migrate seed ch-ddl
-make -f Makefile.data verify     # 52 tests + the contract check
+make -f Makefile.data corpus     # fetch + convert + load FY2024 and FY2025, then gate
+make -f Makefile.data verify     # 70 tests + the contract check
 make -f Makefile.data demo       # both personas' clocks, computed, from the API
 ```
+
+`corpus` downloads roughly 155 MB from DOL and takes a few minutes. Everything else
+is seconds.
 
 `demo` prints real output. If it prints `Días de desempleo remaining=16` and a
 cap-gap card with `struck SEP 30 2026 delta=+183d`, the whole spine is working:
@@ -33,9 +37,9 @@ from `docs/REVIEW.md` that changes a number:
 
 ## What works end to end
 
-`GET /v1/clocks` computes. It loads the person from Postgres inside a transaction
-bound to the session subject, resolves the governing rule set, runs the engine,
-fills `change_reason`, appends to the outbox, and serialises to the contract.
+**Clocks.** `GET /v1/clocks` computes. It loads the person from Postgres inside a
+transaction bound to the session subject, resolves the governing rule set, runs the
+engine, fills `change_reason`, appends to the outbox, and serialises to the contract.
 
 ```
 == sess_maria  as_of=2026-08-28  needs_attention=1
@@ -45,73 +49,96 @@ fills `change_reason`, appends to the outbox, and serialises to the contract.
         struck SEP 30 2026  delta=+183d
         H-1B Modernization Final Rule | eff. 2025-01-17 | verified=False
    [not running] ac21_365       not in H-1B status; the six-year meter has not started
-   [not running] h1b_max_stay   not in H-1B status; the six-year meter has not started
 ```
 
-Verified against Postgres 17 and ClickHouse 26.7.5:
+**Corpus.** `GET /v1/corpus/wage-percentile` runs an exact scan over 239,477 real
+rows of DOL OFLC LCA disclosure data in roughly 20 to 45 ms.
+
+```
+Software Developers  CA  $188,000  FY2025
+   percentile 50.3  of n=5,991
+   wage_level 3     next_level_wage $213,512
+   bands: I=$135,699(n=465) II=$161,637(n=1,424) III=$187,574(n=1,125) IV=$213,512(n=1,020)
+```
+
+That divergence is finding B10 demonstrated: the same wage is **middling among peers**
+and **Level III** by the OES measure. The response says in words that a percentile is
+not a selection probability.
+
+An uncovered occupation refuses rather than estimates. Home Health Aides have **one**
+certified filing in the whole corpus, and that is the build spec's own demo persona.
+See `docs/REVIEW.md` C8; it affects the demo script.
+
+**Verified**, against Postgres 17 and ClickHouse 26.7.5:
 
 ```
 db/migrations/0001..0007     applied clean
 db/seeds/010, 020, 030       13 rules, 2 supersession chains, 2 personas
-clickhouse/ddl/010,020,030   4 materialized views created and populating
+clickhouse/ddl/010,020,030   5 materialized views, all populating
+corpus                       239,477 rows / 216,775 certified / FY2024 Q4 + FY2025 Q4
+data_quality.sql             10 gates, all pass
 engine/tests                 28 passed   (no database)
-api/tests                    24 passed   (real Postgres, real routes)
+api/tests                    42 passed   (real Postgres, real ClickHouse, real routes)
 contracts/validate.py        contract green
 ```
 
-**RLS is load-bearing, not decorative.** `api/repository.py` deliberately omits
-`WHERE user_id` on every query. Migration 0007 adds an app role with
-`NOBYPASSRLS`, because a superuser bypasses row security unconditionally and the
-policies would exist and never fire. Tests assert that a transaction bound to Maria
-sees exactly 3 status periods and 1 user, that naming Daniel's id explicitly returns
-zero rows, and that passing `?user_id=` changes nothing.
+**RLS is load-bearing.** `api/repository.py` deliberately omits `WHERE user_id`
+everywhere. Migration 0007 adds an app role with `NOBYPASSRLS`, because a superuser
+bypasses row security unconditionally and the policies would exist and never fire.
+Tests assert a transaction bound to Maria sees exactly 3 status periods and 1 user,
+that naming Daniel's id explicitly returns zero rows, and that `?user_id=` changes
+nothing.
 
-**Ten constraint behaviours checked individually.** Cap-gap and a pending I-485 are
-accepted overlapping the primary status; a second overlapping primary status, two
-overlapping cap-gaps, a forked `supersedes` chain, overlapping rule windows,
-`{"dayz":60}`, and superseding a different `rule_key` are all rejected.
+**Silent-wrong bugs caught by running it, not reading it.** Each has a regression
+test:
 
-**Three findings now carry numbers.** A pending PERM case stores **45,447** days
-under the spec's `UInt16`. A `$150,000/hour` typo becomes **$312,000,000** in the
-wage distribution under the spec's `multiIf`. On identical data the spec's replay
-query returns **zero rows** where `replay_diff.sql` returns both affected users.
+| What | Consequence if unfixed |
+|---|---|
+| `case_status = 'CERTIFIED'` (source says `Certified`) | every view empty, no error |
+| SOC `15-1252.00` vs `15-1252` | percentile over 1% of the occupation |
+| `{fy:UInt16} AS fiscal_year` shadowing the column | fiscal-year filter vanishes; both years summed |
+| `PW_UNIT_OF_PAY` ignored | offered-vs-prevailing out by ~2,080x |
+| 445,109 blank spreadsheet rows | distributions over mostly nothing |
+| `days_to_decision UInt16` | pending PERM case reads 45,447 days |
+| `$150k/hour` typo | $312,000,000 in the wage distribution |
 
 ## What is still NOT verified
 
-- **`/v1/claims/check` and `/v1/corpus/wage-percentile` are still fixtures.** Both
-  carry a `_warning`. The wage one says outright that a fabricated percentile is the
-  harm this product exists to prevent.
-- **No real OFLC file has been loaded.** `ingest/load.py --dry-run` was tested
-  against synthetic CSVs only, so `ingest/column_maps.py` is still guesses. Run
-  `python -m ingest.headers` on a real file before trusting it.
-- **`employer_fein` and `worksite_msa` were 100% missing** in the synthetic data,
-  which proves the quality query works and says nothing about the real corpus.
+- **`/v1/claims/check` is still a fixture.** It carries a `_warning`. Claim matching
+  needs exact/alias lookup first and vector search for the tail (REVIEW C5).
 - **The outbox is never drained.** Rows accumulate with `replicated_at IS NULL`;
-  nothing carries them to ClickHouse yet.
+  nothing carries them to `clock_evaluations` in ClickHouse yet.
+- **The population replay has never run on volume.** `/v1/scenarios/replay` returns
+  real `rows_scanned` and `elapsed_ms` for one person. Seed 50k synthetic users
+  before putting a number on the architecture slide.
 - **PeerDB has not been attempted.**
 - **No alerts are generated or delivered**, and `alert_templates` is empty.
+- **PERM and the Visa Bulletin are not loaded.** Both tables exist and are empty.
+- **`soc_embeddings` is empty.** No embedding step has been run (REVIEW C5).
+- **Only Q4 files are loaded**, one per fiscal year. They span the year by decision
+  date, but they are not the full quarterly set.
 - **Every rule is unverified against its primary source.** Deliberate, and the UI
   depends on it, but E2, E3 and E4 are yours to close.
 
 ## Then, in order
 
-1. **Load two fiscal years of LCA data.** `python -m ingest.headers <file>` first,
-   fix `column_maps.py`, then `--dry-run`, then load. `make -f Makefile.data quality`
-   must pass before any corpus query is trusted.
-2. **Wire `/v1/corpus/wage-percentile`** to `clickhouse/queries/wage_percentile.sql`.
-   Exact scan, not interpolated from quantile states. Return `n_filings` always.
-3. **Drain the outbox to ClickHouse.** Simplest working version first: a loop that
-   selects `WHERE replicated_at IS NULL`, inserts into `clock_evaluations`, and
-   stamps the rows. That is a real CDC path and it takes twenty minutes. PeerDB is
-   an upgrade, not a prerequisite.
-4. **Measure the replay query.** `rows_scanned` and `elapsed_ms` come back real from
-   `/v1/scenarios/replay` now, but the population-scale query has never run on
-   volume. Seed 50k synthetic users, run it with and without the `by_clock`
-   projection, and put both timings on the architecture slide.
-5. **Generate alerts** in the same transaction as the evaluations, using
+1. **Drain the outbox to ClickHouse.** A loop that selects `WHERE replicated_at IS
+   NULL`, inserts into `clock_evaluations`, and stamps the rows. That is a real CDC
+   path and it is maybe twenty minutes. PeerDB is an upgrade, not a prerequisite.
+2. **Seed 50k synthetic users and measure the population replay.** Run
+   `clickhouse/queries/replay_diff.sql` with and without the `by_clock` projection and
+   put both timings on the architecture slide. One measured number beats three
+   paragraphs of "runs in seconds in ClickHouse".
+3. **Decide the Standing-screen persona with Person B.** The corpus cannot answer for
+   a home health aide. Either demo an occupation it covers, or demo the honest
+   refusal, which is a defensible and arguably stronger choice. What cannot happen is
+   the §8 script as written.
+4. **Generate alerts** in the same transaction as the evaluations, using
    `template_key` plus params. Person B writes the reviewed Spanish.
-6. **Timebox PeerDB.** Decide the fallback before starting: step 3 above already is
-   one.
+5. **Wire `/v1/claims/check`.** Exact and alias match first, vector search for the
+   tail. It is the stale-advice beat and it is currently a fixture.
+6. **Load PERM** if there is time. `perm_filings` exists and `days_to_decision` is
+   already correct for pending cases.
 
 ## Your review findings
 
