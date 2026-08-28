@@ -23,26 +23,33 @@ class ClickHouseError(RuntimeError):
     pass
 
 
-def query(sql: str, params: dict | None = None, timeout: int = 30) -> tuple[list[dict], float]:
+def query(sql: str, params: dict | None = None, timeout: int = 30,
+          body: str | None = None) -> tuple[list[dict], float]:
     """Run a SELECT and return (rows, elapsed_ms).
 
     Parameters go through ClickHouse's own {name:Type} substitution rather than
     string interpolation, so a SOC code cannot become SQL.
     """
-    args = {"query": sql.rstrip().rstrip(";") + " FORMAT JSON",
-            "default_format": "JSON"}
+    # An INSERT ... FORMAT TabSeparated carries its rows in the request body and must
+    # NOT have FORMAT JSON appended.
+    if body is not None:
+        args = {"query": sql}
+    else:
+        args = {"query": sql.rstrip().rstrip(";") + " FORMAT JSON",
+                "default_format": "JSON"}
     for key, value in (params or {}).items():
         args[f"param_{key}"] = str(value)
 
     url = f"http://{CH_HOST}:{CH_PORT}/?" + urllib.parse.urlencode(args)
-    req = urllib.request.Request(url, method="POST")
+    req = urllib.request.Request(url, data=(body or "").encode(), method="POST")
     req.add_header("X-ClickHouse-User", CH_USER)
     req.add_header("X-ClickHouse-Key", CH_PASSWORD)
 
     started = time.perf_counter()
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            payload = json.loads(resp.read().decode())
+            raw = resp.read().decode()
+        payload = json.loads(raw) if raw.strip() else {}
     except urllib.error.HTTPError as exc:
         raise ClickHouseError(exc.read().decode()[:1000]) from None
     except OSError as exc:
