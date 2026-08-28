@@ -6,7 +6,7 @@ SHELL := /bin/bash
 PG    := postgresql://postgres:$${POSTGRES_PASSWORD:-devonly}@localhost:5432/status_clock
 CH    := clickhouse client --host localhost --password $${CLICKHOUSE_PASSWORD:-devonly}
 
-.PHONY: help deps up down migrate seed ch-ddl fetch convert load corpus quality replicate reset-evals test itest api verify reset demo
+.PHONY: help deps up down migrate seed ch-ddl ch-user fetch convert load corpus quality replicate reset-evals test itest api verify reset demo
 
 help:
 	@grep -E '^[a-z-]+:.*?##' $(MAKEFILE_LIST) | sed 's/:.*##/\t/' | column -t -s $$'\t'
@@ -27,7 +27,17 @@ seed:          ## seed rule param shapes and rules
 	@for f in db/seeds/*.sql; do echo "== $$f"; psql "$(PG)" -v ON_ERROR_STOP=1 -f "$$f" || exit 1; done
 
 ch-ddl:        ## apply ClickHouse DDL. ORDER MATTERS: views before data. REVIEW A5.
-	@for f in clickhouse/ddl/0*.sql; do echo "== $$f"; $(CH) --multiquery < "$$f" || exit 1; done
+	@for f in clickhouse/ddl/0[0-8]*.sql; do echo "== $$f"; $(CH) --multiquery < "$$f" || exit 1; done
+	@$(MAKE) -f Makefile.data ch-user
+
+ch-user:       ## create the read-only ClickHouse user the LibreChat MCP connects as
+	@# 090 is applied separately because it carries a password placeholder. It needs
+	@# CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1 on the server, which infra/data.compose.yml
+	@# sets; without it the default user has no CREATE USER grant and the only way to
+	@# give the agent ClickHouse access is to hand it admin credentials.
+	@sed 's/{{CH_READONLY_PASSWORD}}/$(or $(CH_READONLY_PASSWORD),devonly-readonly)/' \
+	  clickhouse/ddl/090_readonly_user.sql | $(CH) --multiquery
+	@echo "chat_readonly ready. Hand Person B: CH_READONLY_PASSWORD=$(or $(CH_READONLY_PASSWORD),devonly-readonly)"
 
 FY ?= 2025
 DOL := https://www.dol.gov/sites/dolgov/files/ETA/oflc/pdfs

@@ -34,6 +34,11 @@ services:
     environment:
       CLICKHOUSE_DB: default
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-devonly}
+      # Required to run clickhouse/ddl/090_readonly_user.sql. Without it the default
+      # user has no CREATE USER grant, the read-only user for the LibreChat MCP
+      # cannot be created, and the only way to give the agent ClickHouse access is to
+      # hand it the admin credentials. That is the hole 090 exists to close.
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
     ports: ["8123:8123", "9000:9000"]
     volumes:
       - ./clickhouse-data:/var/lib/clickhouse

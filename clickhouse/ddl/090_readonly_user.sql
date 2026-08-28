@@ -4,7 +4,17 @@
 -- compose SQL; an agent that can compose SQL against a writable connection is a
 -- hole, not a feature. See docs/OWNERSHIP.md.
 --
--- Substitute a real password from infra/.env before running.
+-- Apply with:  make -f Makefile.data ch-user
+--
+-- Requires CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1 on the server, which
+-- infra/data.compose.yml sets. Without it the default user has no CREATE USER grant,
+-- this file fails with ACCESS_DENIED, and the only way to give the agent ClickHouse
+-- access is to hand it the admin credentials. That is the hole this file exists to
+-- close, so the failure mode is worth naming.
+--
+-- Verified after creation: chat_readonly can SELECT lca_filings, perm_filings and
+-- wage_baselines, and is DENIED on clock_evaluations, on INSERT, on DROP, and on
+-- system.users.
 
 CREATE USER IF NOT EXISTS chat_readonly
   IDENTIFIED WITH sha256_password BY '{{CH_READONLY_PASSWORD}}'
