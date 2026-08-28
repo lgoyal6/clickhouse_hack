@@ -269,3 +269,89 @@ def test_demo_user_ids_are_real_uuids(maria, daniel):
     import uuid
     for state in (maria, daniel):
         assert str(uuid.UUID(state.user_id)) == state.user_id
+
+
+# --------------------------------------------------- the last three clocks -----
+
+def test_grace_period_does_not_run_while_employed(daniel, as_of, ruleset):
+    from engine.clocks import h1b_grace_period
+    ok, reason = h1b_grace_period.applies(daniel, as_of)
+    assert not ok and "currently employed" in reason
+
+
+def test_grace_period_counts_from_the_last_day_worked(daniel, as_of, ruleset):
+    from engine.clocks import h1b_grace_period
+    from engine.state import EmploymentEpisode
+    laid_off = type(daniel)(**{**daniel.__dict__, "employment": (
+        EmploymentEpisode("Bay Area Community College", D(2021, 10, 1), D(2026, 8, 1), 40),)})
+    r = h1b_grace_period.compute(laid_off, as_of, ruleset)
+    assert r["days_consumed"] == 27               # 2026-08-01 -> 2026-08-28
+    assert r["days_remaining"] == 33
+    assert r["window_end"] == D(2026, 9, 30)
+    assert r["severity"] == "info"
+
+
+def test_grace_period_is_the_replay_target(daniel, as_of, ruleset):
+    """Eliminating it must show up as 60 days lost, for someone not yet laid off's
+    sake this uses the laid-off variant."""
+    from engine.clocks import h1b_grace_period
+    from engine.state import EmploymentEpisode
+    from engine.tests.conftest import SEED
+    laid_off = type(daniel)(**{**daniel.__dict__, "employment": (
+        EmploymentEpisode("X", D(2021, 10, 1), D(2026, 8, 1), 40),)})
+    actual = h1b_grace_period.compute(laid_off, as_of, ruleset)
+    zeroed = h1b_grace_period.compute(
+        laid_off, as_of, RuleSet(SEED, overrides={"h1b_grace_period": {"days": 0}}))
+    assert actual["days_remaining"] == 33
+    assert zeroed["days_remaining"] == -27
+    assert zeroed["severity"] == "critical"
+
+
+def test_portability_needs_an_i485(daniel, as_of, ruleset):
+    from engine.clocks import i485_portability
+    ok, reason = i485_portability.applies(daniel, as_of)
+    assert not ok and "no I-485 on file" in reason
+
+
+def test_portability_counts_up_to_a_freedom(daniel, as_of, ruleset):
+    from engine.clocks import i485_portability
+    from engine.state import Milestone
+    filed = type(daniel)(**{**daniel.__dict__,
+                            "milestones": (Milestone("I485_FILED", D(2026, 6, 1)),)})
+    r = i485_portability.compute(filed, as_of, ruleset)
+    assert r["window_end"] == D(2026, 11, 28)
+    assert r["days_remaining"] == 92
+    assert r["severity"] == "info", "counting up to a freedom is never critical"
+
+    later = i485_portability.compute(filed, D(2027, 1, 1), ruleset)
+    assert later["days_remaining"] == 0
+    assert later["severity"] == "clear"
+    assert "portability is available" in later["derivation"]
+
+
+def test_filing_window_closes_once_opt_is_authorised(maria, as_of, ruleset):
+    from engine.clocks import opt_filing_window
+    ok, reason = opt_filing_window.applies(maria, as_of)
+    assert not ok and "already authorised" in reason
+
+
+def test_filing_window_spans_90_before_to_60_after(ruleset):
+    from engine.clocks import opt_filing_window
+    from engine.state import StatusPeriod, UserState
+    student = UserState(
+        user_id="00000000-0000-4000-8000-00000000f001",
+        status_periods=(StatusPeriod("F1", "primary", D(2022, 8, 20), None,
+                                     program_end=D(2026, 12, 18)),))
+    ok, _ = opt_filing_window.applies(student, D(2026, 8, 28))
+    assert ok
+    r = opt_filing_window.compute(student, D(2026, 8, 28), ruleset)
+    assert r["window_start"] == D(2026, 9, 19)     # 90 days before
+    assert r["window_end"] == D(2027, 2, 16)       # 60 days after
+    assert r["window_days"] == 150
+    assert "runs independently" in r["derivation"], "the 30-day I-20 clock must be named"
+
+
+def test_all_seven_clocks_are_implemented():
+    from engine.clocks import REGISTRY, ALL_CLOCK_KEYS, NOT_YET_IMPLEMENTED
+    assert NOT_YET_IMPLEMENTED == ()
+    assert set(REGISTRY) == set(ALL_CLOCK_KEYS)

@@ -33,6 +33,12 @@ SEED = [
        "INA Sec. 214(g)(4)", "INA"),
     _r("r-minhours", "opt_min_hours", D(2008, 4, 8), {"hours": 20},
        "SEVP Policy Guidance", "ICE SEVP Guidance"),
+    _r("r-grace-60", "h1b_grace_period", D(2017, 1, 17), {"days": 60},
+       "8 CFR 214.1(l)(2)"),
+    _r("r-port-180", "i485_portability", D(2000, 10, 17), {"days": 180},
+       "INA Sec. 204(j)", "INA"),
+    _r("r-optwindow", "opt_filing_window", D(2008, 4, 8),
+       {"before": 90, "after": 60, "i20_days": 30}, "8 CFR 214.2(f)(11)"),
 ]
 
 

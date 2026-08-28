@@ -6,11 +6,13 @@ H-1B clocks for one person, which no single person can be running: someone in
 cap-gap is in F-1 status with a pending petition, so the six-year meter has not
 started and AC21 has nothing to extend. See docs/REVIEW.md B11.
 """
-from . import opt_unemployment, cap_gap_window, ac21_365, h1b_max_stay
+from . import (opt_unemployment, cap_gap_window, ac21_365, h1b_max_stay,
+               h1b_grace_period, i485_portability, opt_filing_window)
 
 REGISTRY = {
     m.CLOCK_KEY: m
-    for m in (opt_unemployment, cap_gap_window, ac21_365, h1b_max_stay)
+    for m in (opt_unemployment, cap_gap_window, ac21_365, h1b_max_stay,
+              h1b_grace_period, i485_portability, opt_filing_window)
 }
 
 # The canonical clock list. The engine and the UI both read this, which is what
