@@ -30,9 +30,23 @@ pytestmark = pytest.mark.skipif(
     reason="needs Postgres and ClickHouse; run make -f Makefile.data up")
 
 
+# The benchmark seeds 127.75M synthetic evaluations under a 9-variant UUID prefix
+# (clickhouse/bench/seed_evaluations.sql). These tests are about the replication path
+# for real, Postgres-sourced evaluations, so they exclude the synthetic set. Without
+# this they scan the whole bench table and time out, which is a slow test rather than
+# a failing behaviour.
+# An explicit id list, not a NOT LIKE on the stringified UUID. The table is ORDER BY
+# (user_id, ...), so IN hits the primary key and reads a handful of granules, while
+# NOT LIKE forces a 127M-row scan and times the test out.
+REAL_USERS = ("00000000-0000-4000-8000-00000000a001",
+              "00000000-0000-4000-8000-00000000d001")
+REAL_ONLY = ("user_id IN (" + ",".join(f"toUUID('{u}')" for u in REAL_USERS) + ")")
+
+
 def _count(scenario: str = "actual") -> int:
     rows, _ = ch.query(
-        "SELECT count() AS n FROM clock_evaluations WHERE scenario_id = {s:String}",
+        f"SELECT count() AS n FROM clock_evaluations "
+        f"WHERE scenario_id = {{s:String}} AND {REAL_ONLY}",
         {"s": scenario})
     return int(rows[0]["n"])
 
@@ -60,8 +74,8 @@ def test_resending_a_batch_does_not_change_the_answer():
     """
     replicate.drain_once(verbose=False)
     rows, _ = ch.query(
-        "SELECT uniqExact((user_id, clock_key, scenario_id, as_of)) AS keys, "
-        "count() AS rows FROM clock_evaluations")
+        f"SELECT uniqExact((user_id, clock_key, scenario_id, as_of)) AS keys, "
+        f"count() AS rows FROM clock_evaluations WHERE {REAL_ONLY}")
     keys, total = int(rows[0]["keys"]), int(rows[0]["rows"])
     # Distinct evaluations, not distinct physical rows: a resend is allowed to add a
     # row, and every query in clickhouse/queries/ groups by the key.
@@ -77,18 +91,28 @@ def test_the_rollup_agrees_with_its_source():
     users who no longer existed, which in an operator view means showing a population
     that is not there. make -f Makefile.data reset-evals truncates both.
     """
+    # Scoped to the days the real evaluations cover, so the bench data does not turn
+    # a correctness check into a full-table scan.
+    days, _ = ch.query(
+        f"SELECT groupUniqArray(as_of) AS d FROM clock_evaluations WHERE {REAL_ONLY}")
+    real_days = days[0]["d"]
+    if not real_days:
+        pytest.skip("no real evaluations replicated")
+
     rows, _ = ch.query("""
         SELECT countIf(agrees = 0) AS disagreements, count() AS compared
         FROM (
           SELECT r.users = s.users AS agrees
           FROM (SELECT as_of, clock_key, scenario_id, severity, uniqMerge(users) AS users
-                FROM risk_rollup GROUP BY as_of, clock_key, scenario_id, severity) r
+                FROM risk_rollup WHERE as_of IN ({d:Array(Date)})
+                GROUP BY as_of, clock_key, scenario_id, severity) r
           FULL JOIN (SELECT as_of, clock_key, scenario_id, severity,
                             uniqExact(user_id) AS users
-                     FROM clock_evaluations WHERE applicable = 1
+                     FROM clock_evaluations
+                     WHERE applicable = 1 AND as_of IN ({d:Array(Date)})
                      GROUP BY as_of, clock_key, scenario_id, severity) s
           USING (as_of, clock_key, scenario_id, severity)
-        )""")
+        )""", {"d": "['" + "','".join(real_days) + "']"})
     assert int(rows[0]["disagreements"]) == 0, "rollup has drifted; run reset-evals"
     assert int(rows[0]["compared"]) > 0
 
@@ -100,16 +124,17 @@ def test_not_applicable_evaluations_are_replicated_too():
     keeping it is what lets the history show the day a clock began.
     """
     rows, _ = ch.query(
-        "SELECT countIf(applicable = 0) AS not_running, countIf(applicable = 1) AS running "
-        "FROM clock_evaluations WHERE scenario_id = 'actual'")
+        f"SELECT countIf(applicable = 0) AS not_running, "
+        f"countIf(applicable = 1) AS running FROM clock_evaluations "
+        f"WHERE scenario_id = 'actual' AND {REAL_ONLY}")
     assert int(rows[0]["not_running"]) > 0
     assert int(rows[0]["running"]) > 0
 
 
 def test_scenario_rows_are_kept_separate_from_actual():
     rows, _ = ch.query(
-        "SELECT scenario_id, count() AS n FROM clock_evaluations "
-        "GROUP BY scenario_id ORDER BY scenario_id")
+        f"SELECT scenario_id, count() AS n FROM clock_evaluations "
+        f"WHERE {REAL_ONLY} GROUP BY scenario_id ORDER BY scenario_id")
     scenarios = {r["scenario_id"] for r in rows}
     assert "actual" in scenarios
     assert len(scenarios) > 1, "no replay scenario has been written"
