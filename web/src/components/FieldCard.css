@@ -7,6 +7,7 @@
  */
 
 .field-card {
+  container-type: inline-size;   /* so the count can size off the card width */
   border: var(--hairline) solid var(--rule);
   background: var(--paper);
   padding: var(--space-4);
@@ -27,10 +28,14 @@
 .field-card__count {
   font-family: var(--font-data);
   font-variant-numeric: var(--figures);
-  font-size: clamp(2rem, 7vw, 3.25rem);
-  line-height: 1;
+  /* Scales with the CARD, not the viewport. 7vw overflowed a 240px grid column and
+     wrapped "134 / 150" onto two lines, which breaks the whole point of tabular
+     figures holding their width. cqi needs the container-type below. */
+  font-size: clamp(1.75rem, 13cqi, 3.25rem);
+  line-height: 1.05;
   letter-spacing: -0.02em;
   color: var(--ink);
+  white-space: nowrap;
 }
 
 .field-card__count--clear    { color: var(--clear); }
