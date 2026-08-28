@@ -62,7 +62,9 @@ ENGINE = SummingMergeTree
 ORDER BY (soc_code, worksite_state, fiscal_year, bucket)
 AS SELECT
   soc_code, worksite_state, fiscal_year,
-  intDiv(toUInt32(annualized), 5000) * 5000 AS bucket,
+  -- assumeNotNull is safe because the WHERE below excludes NULL, and it is
+  -- REQUIRED because a nullable expression cannot sit in a sorting key.
+  intDiv(toUInt32(assumeNotNull(annualized)), 5000) * 5000 AS bucket,
   count() AS n
 FROM (
   SELECT
@@ -88,13 +90,22 @@ CREATE MATERIALIZED VIEW IF NOT EXISTS employer_profiles
 ENGINE = AggregatingMergeTree
 ORDER BY (employer_key, fiscal_year)
 AS SELECT
-  lowerUTF8(replaceRegexpAll(employer_name, '[^\\w\\s]|\\b(inc|llc|corp|corporation|ltd|co)\\b', '')) AS employer_key,
-  anyState(employer_name)   AS employer_name,
+  employer_key,
+  -- Aliased distinctly from the source column. `anyState(employer_name) AS
+  -- employer_name` shadows the source column, so the employer_key expression then
+  -- resolves against an AggregateFunction and the view fails to create.
+  anyState(raw_name)        AS employer_name_state,
   fiscal_year,
   countState()              AS lca_count,
   uniqState(soc_code)       AS distinct_socs,
   maxState(received_date)   AS latest_filing
-FROM lca_filings
+FROM (
+  SELECT
+    employer_name AS raw_name,
+    lowerUTF8(replaceRegexpAll(employer_name, '[^\\w\\s]|\\b(inc|llc|corp|corporation|ltd|co)\\b', '')) AS employer_key,
+    soc_code, received_date, fiscal_year, case_status
+  FROM lca_filings
+)
 WHERE case_status = 'CERTIFIED'
 GROUP BY employer_key, fiscal_year;
 
