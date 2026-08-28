@@ -3,62 +3,69 @@
 One canonical target schema, one map per source vintage. See ingest/README.md and
 docs/REVIEW.md C1.
 
-THESE MAPS ARE UNVERIFIED. Nobody has run them against a real file yet. Print the
-actual headers first:
+VERIFIED against the real files for FY2024 Q4 and FY2025 Q4 (98 columns each,
+identical headers). Three things the real data settled:
+
+  * EMPLOYER_FEIN IS present, at index 30. docs/REVIEW.md C2 raised the possibility
+    that it was absent from recent files; it is not. Coverage is a separate question,
+    answered by clickhouse/queries/data_quality.sql.
+  * WORKSITE_MSA does NOT exist. There is WORKSITE_COUNTY and a PW_TRACKING_NUMBER,
+    and nothing else. docs/REVIEW.md C3 is confirmed: state is the contract.
+  * PW_UNIT_OF_PAY is a SEPARATE column from WAGE_UNIT_OF_PAY. The prevailing wage
+    carries its own unit, so comparing a raw prevailing_wage against an annualised
+    offered wage compares an hourly figure to a yearly one. Both must be annualised
+    independently. This is not in the build spec's schema at all.
+
+Verify with:
 
     python -m ingest.headers path/to/LCA_Disclosure_Data_FY2025_Q4.xlsx
-
-and correct the map before loading. A silently mismapped wage column is the worst
-outcome available here.
 """
 
 CANONICAL = (
-    "case_number", "case_status", "received_date", "decision_date",
+    "case_number", "case_status", "visa_class", "received_date", "decision_date",
     "begin_date", "end_date", "employer_name", "employer_fein",
     "soc_code", "soc_title", "job_title", "full_time",
-    "worksite_city", "worksite_state", "worksite_msa",
-    "wage_rate_from", "wage_unit", "prevailing_wage", "pw_level",
+    "worksite_city", "worksite_county", "worksite_state",
+    "wage_rate_from", "wage_unit", "prevailing_wage", "pw_unit", "pw_level",
 )
 
 # FY2020 onward. Column names in the modern disclosure files.
 LCA_MODERN = {
     "case_number": "CASE_NUMBER",
     "case_status": "CASE_STATUS",
+    "visa_class": "VISA_CLASS",       # H-1B, H-1B1 Chile/Singapore, E-3 Australia
     "received_date": "RECEIVED_DATE",
     "decision_date": "DECISION_DATE",
     "begin_date": "BEGIN_DATE",
     "end_date": "END_DATE",
     "employer_name": "EMPLOYER_NAME",
-    "employer_fein": None,            # verify: may be absent. REVIEW C2.
+    "employer_fein": "EMPLOYER_FEIN", # present. REVIEW C2 resolved.
     "soc_code": "SOC_CODE",
     "soc_title": "SOC_TITLE",
     "job_title": "JOB_TITLE",
     "full_time": "FULL_TIME_POSITION",
     "worksite_city": "WORKSITE_CITY",
+    "worksite_county": "WORKSITE_COUNTY",
     "worksite_state": "WORKSITE_STATE",
-    "worksite_msa": None,             # verify per year. REVIEW C3.
+    # No MSA column exists. REVIEW C3 confirmed; state is the contract.
     "wage_rate_from": "WAGE_RATE_OF_PAY_FROM",
     "wage_unit": "WAGE_UNIT_OF_PAY",
     "prevailing_wage": "PREVAILING_WAGE",
+    "pw_unit": "PW_UNIT_OF_PAY",      # its OWN unit. Not the offered-wage unit.
     "pw_level": "PW_WAGE_LEVEL",
 }
 
 # FY2019 and earlier used a different vintage of names.
-LCA_LEGACY = {
-    **LCA_MODERN,
-    "case_number": "CASE_NUMBER",
-    "case_status": "CASE_STATUS",
-    "wage_rate_from": "WAGE_RATE_OF_PAY_FROM",
-    "wage_unit": "WAGE_UNIT_OF_PAY",
-    "pw_level": "PW_WAGE_LEVEL",
-    "worksite_city": "WORKSITE_CITY",
-    "worksite_state": "WORKSITE_STATE",
-}
+# FY2019 and earlier are a different vintage and have NOT been checked. Run
+# ingest.headers on one before adding it here; do not assume it matches.
+LCA_LEGACY = dict(LCA_MODERN)
 
 LCA_MAPS = {
-    2019: LCA_LEGACY,
-    2020: LCA_MODERN, 2021: LCA_MODERN, 2022: LCA_MODERN,
-    2023: LCA_MODERN, 2024: LCA_MODERN, 2025: LCA_MODERN, 2026: LCA_MODERN,
+    # Verified against the real file.
+    2024: LCA_MODERN, 2025: LCA_MODERN,
+    # Same vintage, unverified. Run ingest.headers before loading one of these.
+    2020: LCA_MODERN, 2021: LCA_MODERN, 2022: LCA_MODERN, 2023: LCA_MODERN,
+    2026: LCA_MODERN,
 }
 
 # The closed set of wage units. A value outside this set means the row cannot be

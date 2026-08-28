@@ -22,8 +22,10 @@ from __future__ import annotations
 import argparse
 import csv
 import pathlib
-import subprocess
 import sys
+import urllib.error
+import urllib.parse
+import urllib.request
 
 from .column_maps import CANONICAL, KNOWN_WAGE_UNITS, map_for
 
@@ -31,15 +33,24 @@ REQUIRED_VIEWS = ("wage_baselines", "wage_histogram", "employer_profiles")
 UNIT_FAILURE_TOLERANCE = 0.005      # 0.5% of rows may carry a junk unit
 
 
-def ch(query: str, host: str, password: str, fmt: str = "TSV") -> str:
-    out = subprocess.run(
-        ["clickhouse", "client", "--host", host, "--password", password,
-         "--format", fmt, "--query", query],
-        capture_output=True, text=True,
-    )
-    if out.returncode != 0:
-        raise RuntimeError(out.stderr.strip())
-    return out.stdout.strip()
+def ch(query: str, host: str, password: str, user: str = "default",
+       body: str | None = None, port: int = 8123) -> str:
+    """Run a query over the ClickHouse HTTP interface.
+
+    HTTP rather than shelling out to `clickhouse client`, which only exists inside
+    the container. This works from the host with no client binary installed, and it
+    is the same path the API uses.
+    """
+    url = f"http://{host}:{port}/?" + urllib.parse.urlencode({"query": query})
+    data = (body or "").encode() if body is not None else b""
+    req = urllib.request.Request(url, data=data, method="POST")
+    req.add_header("X-ClickHouse-User", user)
+    req.add_header("X-ClickHouse-Key", password)
+    try:
+        with urllib.request.urlopen(req, timeout=300) as resp:
+            return resp.read().decode().strip()
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(exc.read().decode()[:2000]) from None
 
 
 def check_order(host: str, password: str) -> None:
@@ -76,6 +87,10 @@ def read_rows(path: pathlib.Path, colmap: dict):
                 f"wrong number."
             )
         for row in reader:
+            # Defensive: the spreadsheets declare far more rows than they hold, and
+            # a blank row would otherwise become a filing with no case number.
+            if not (row.get("CASE_NUMBER") or "").strip():
+                continue
             yield {canon: (row.get(src) if src else None)
                    for canon, src in colmap.items()}
 
@@ -86,6 +101,77 @@ def audit_units(rows: list[dict]) -> dict[str, int]:
         unit = (r.get("wage_unit") or "").strip()
         counts[unit] = counts.get(unit, 0) + 1
     return counts
+
+
+DATE_COLS = ("received_date", "decision_date", "begin_date", "end_date")
+NUM_COLS = ("wage_rate_from", "prevailing_wage")
+
+TARGET_COLS = (
+    "case_number", "case_status", "visa_class", "received_date", "decision_date",
+    "begin_date", "end_date", "employer_name", "employer_fein", "soc_code",
+    "soc_title", "job_title", "full_time", "worksite_city", "worksite_county",
+    "worksite_state", "wage_rate_from", "wage_unit", "prevailing_wage", "pw_unit",
+    "pw_level", "fiscal_year", "source_file",
+)
+
+
+def _date(v: str | None) -> str:
+    """OFLC dates arrive as '2025-01-05' or '2025-01-05 00:00:00'. Empty -> \\N."""
+    v = (v or "").strip()
+    if not v:
+        return "\\N"
+    return v.split(" ")[0].split("T")[0]
+
+
+def _num(v: str | None) -> str:
+    v = (v or "").strip().replace(",", "").replace("$", "")
+    if not v:
+        return "\\N"
+    try:
+        float(v)
+    except ValueError:
+        return "\\N"
+    return v
+
+
+def insert(rows: list[dict], args, colmap: dict) -> int:
+    """Stream rows to ClickHouse as TSV with \\N for nulls.
+
+    TSV rather than CSV because the free-text columns in this corpus contain commas,
+    quotes and the occasional stray backslash, and TSV with explicit escaping is the
+    format ClickHouse handles most predictably here.
+    """
+    def esc(v) -> str:
+        if v is None:
+            return "\\N"
+        return (str(v).replace("\\", "\\\\").replace("\t", " ")
+                .replace("\n", " ").replace("\r", " ").strip())
+
+    lines = []
+    for r in rows:
+        out = []
+        for col in TARGET_COLS:
+            if col == "fiscal_year":
+                out.append(str(args.fiscal_year))
+            elif col == "source_file":
+                out.append(args.path.name)
+            elif col in DATE_COLS:
+                out.append(_date(r.get(col)))
+            elif col in NUM_COLS:
+                out.append(_num(r.get(col)))
+            else:
+                out.append(esc(r.get(col)))
+        lines.append("\t".join(out))
+
+    query = f"INSERT INTO lca_filings ({', '.join(TARGET_COLS)}) FORMAT TabSeparated"
+    # Chunked so a 118k-row file does not become one 60 MB request body.
+    sent = 0
+    for i in range(0, len(lines), 20_000):
+        chunk = lines[i:i + 20_000]
+        ch(query, args.host, args.password, body="\n".join(chunk) + "\n")
+        sent += len(chunk)
+        print(f"  inserted {sent:,}/{len(lines):,}", flush=True)
+    return len(lines)
 
 
 def main(argv: list[str]) -> int:
@@ -133,12 +219,11 @@ def main(argv: list[str]) -> int:
         print("\ndry run: nothing inserted")
         return 0
 
-    # TODO: stream rows into clickhouse via INSERT ... FORMAT CSV. Kept out of this
-    # commit so the gates above can be reviewed on their own.
-    raise SystemExit(
-        "insert path not written yet. --dry-run works and is the part that matters "
-        "first: run it on every file before loading any of them."
-    )
+    inserted = insert(rows, args, colmap)
+    print(f"\ninserted {inserted:,} rows into lca_filings "
+          f"(fiscal_year={args.fiscal_year}, source_file={args.path.name})")
+    print("\nNow run:  make -f Makefile.data quality")
+    return 0
 
 
 if __name__ == "__main__":

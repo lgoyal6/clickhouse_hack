@@ -1,48 +1,71 @@
 -- The corpus.
 --
--- Two changes from docs/BUILD_SPEC.md 4 that exist to prevent silent-wrong data,
--- which is the worst failure mode this product has:
+-- Verified against the real DOL OFLC LCA disclosure files for FY2024 Q4 and
+-- FY2025 Q4 (98 columns, identical headers). Four things the real data forced,
+-- none of which are in docs/BUILD_SPEC.md 4:
 --
---   1. annualized_wage fails CLOSED. OFLC wage-unit spellings are not stable across
---      fiscal years: newer files use Year/Hour/Week/Month/Bi-Weekly, older ones use
---      YR/HR/WK/MTH/BI. The spec's multiIf falls through to the raw value, so every
---      unmatched hourly row enters the distribution as if $52.00 were an annual
---      salary and the p50 for an occupation quietly collapses. See REVIEW A8.
+--   1. `case_status` is 'Certified', NOT 'CERTIFIED'. Every filter in the spec (and
+--      in the first draft of this file) used the uppercase form and would have
+--      matched ZERO rows. `case_status_norm` normalises once so no query has to
+--      guess. This is the single most dangerous kind of bug this product can have:
+--      an empty result that looks like a working query.
 --
---   2. Dates that can legitimately be absent are Nullable. A missing Date lands on
---      1970-01-01, and dateDiff into a UInt16 from there is nonsense with no error.
---      See REVIEW A7.
+--   2. `PW_UNIT_OF_PAY` is a SEPARATE column from `WAGE_UNIT_OF_PAY`. The prevailing
+--      wage carries its own unit, so comparing a raw prevailing wage against an
+--      annualised offered wage compares hourly to yearly. Both are annualised
+--      independently here. Without this, any wage-level comparison is wrong.
+--
+--   3. `annualized_wage` fails CLOSED. Real unit values in these files are
+--      Year / Hour / Month / Week / Bi-Weekly, but a fall-through to the raw value
+--      means an unmatched hourly row enters the distribution as if $52.00 were an
+--      annual salary and the p50 for an occupation quietly collapses. See REVIEW A8.
+--
+--   4. `WORKSITE_MSA` does not exist in the source. State is the contract.
+--      See REVIEW C3. `EMPLOYER_FEIN` does exist, which REVIEW C2 doubted.
+--
+--   5. SOC codes appear in TWO spellings: '15-1252.00' (236,886 rows, 623 codes) and
+--      bare '15-1252' (2,591 rows, 189 codes). For Software Developers that is
+--      74,504 rows versus 547. Querying either spelling alone silently loses most of
+--      the corpus and still returns a confident percentile, which is the exact
+--      failure mode this product exists to prevent. `soc_code_norm` strips the
+--      O*NET detail suffix; every view and every query keys on it.
 
-CREATE TABLE IF NOT EXISTS lca_filings (
+DROP TABLE IF EXISTS lca_filings;
+
+CREATE TABLE lca_filings (
   case_number      String,
   case_status      LowCardinality(String),
-  received_date    Date,
+  -- Normalised once, at write time. Query this, never case_status.
+  case_status_norm LowCardinality(String) MATERIALIZED upperUTF8(trim(BOTH ' ' FROM case_status)),
+  visa_class       LowCardinality(String),   -- H-1B | H-1B1 Chile | E-3 Australian | ...
+  received_date    Nullable(Date),
   decision_date    Nullable(Date),
   begin_date       Nullable(Date),
   end_date         Nullable(Date),
   employer_name    String,
   employer_name_norm String MATERIALIZED
-    lowerUTF8(replaceRegexpAll(employer_name, '[^\\w\\s]|\\b(inc|llc|corp|corporation|ltd|co)\\b', '')),
-  -- Nullable and NOT trusted as a key. Recent OFLC disclosure files do not
-  -- reliably publish FEIN; verify the actual headers before depending on it.
-  -- See REVIEW C2.
-  employer_fein    Nullable(String),
+    lowerUTF8(trim(BOTH ' ' FROM replaceRegexpAll(employer_name,
+      '(?i)[^\\w\\s]|\\b(inc|llc|l\\.l\\.c|corp|corporation|incorporated|ltd|limited|co)\\b', ' '))),
+  employer_fein    String,
   soc_code         LowCardinality(String),
+  -- '15-1252.00' and '15-1252' are the same occupation. Query this, not soc_code.
+  soc_code_norm    LowCardinality(String) MATERIALIZED
+    splitByChar('.', trim(BOTH ' ' FROM soc_code))[1],
   soc_title        String,
   job_title        String,
-  full_time        UInt8,
+  full_time        LowCardinality(String),
   worksite_city    String,
+  worksite_county  String,
   worksite_state   LowCardinality(String),
-  worksite_msa     Nullable(String),          -- availability varies by FY. REVIEW C3.
-  wage_rate_from   Nullable(Decimal(12,2)),
+  wage_rate_from   Nullable(Decimal(14,2)),
   wage_unit        LowCardinality(String),
-  prevailing_wage  Nullable(Decimal(12,2)),
-  pw_level         Nullable(UInt8),
-  fiscal_year      UInt16,                    -- year of the disclosure FILE. REVIEW C4.
+  prevailing_wage  Nullable(Decimal(14,2)),
+  pw_unit          LowCardinality(String),
+  pw_level         LowCardinality(String),   -- 'I'..'IV', and blank on non-OES sources
+  fiscal_year      UInt16,
   source_file      LowCardinality(String),
 
-  -- Fails closed: NULL on an unrecognised unit rather than a wrong number.
-  annualized_wage  Nullable(Decimal(14,2)) MATERIALIZED
+  annualized_wage  Nullable(Decimal(16,2)) MATERIALIZED
     multiIf(wage_rate_from IS NULL, NULL,
             wage_unit IN ('Year','YR','Annual'),      wage_rate_from,
             wage_unit IN ('Hour','HR','Hourly'),      wage_rate_from * 2080,
@@ -51,31 +74,46 @@ CREATE TABLE IF NOT EXISTS lca_filings (
             wage_unit IN ('Bi-Weekly','BI'),          wage_rate_from * 26,
             NULL),
 
+  -- Annualised with pw_unit, not wage_unit. They differ on real rows.
+  annualized_pw    Nullable(Decimal(16,2)) MATERIALIZED
+    multiIf(prevailing_wage IS NULL, NULL,
+            pw_unit IN ('Year','YR','Annual'),        prevailing_wage,
+            pw_unit IN ('Hour','HR','Hourly'),        prevailing_wage * 2080,
+            pw_unit IN ('Month','MTH','Monthly'),     prevailing_wage * 12,
+            pw_unit IN ('Week','WK','Weekly'),        prevailing_wage * 52,
+            pw_unit IN ('Bi-Weekly','BI'),            prevailing_wage * 26,
+            NULL),
+
   -- A single $150,000/hour typo moves a p90. Flag rather than silently include.
   wage_suspect     UInt8 MATERIALIZED
     if(annualized_wage IS NULL, 1,
-       if(annualized_wage < 10000 OR annualized_wage > 3000000, 1, 0))
+       if(annualized_wage < 10000 OR annualized_wage > 3000000, 1, 0)),
+
+  -- Ratio of offer to prevailing wage. This, not the peer percentile, is the shape
+  -- of the number the wage-weighted selection mechanism cares about. See REVIEW B10.
+  pw_ratio         Nullable(Float64) MATERIALIZED
+    if(annualized_pw IS NULL OR annualized_pw = 0 OR annualized_wage IS NULL, NULL,
+       toFloat64(annualized_wage) / toFloat64(annualized_pw))
 ) ENGINE = MergeTree
-ORDER BY (soc_code, worksite_state, fiscal_year);
+ORDER BY (soc_code_norm, worksite_state, fiscal_year);
 
 CREATE TABLE IF NOT EXISTS perm_filings (
   case_number      String,
   case_status      LowCardinality(String),
+  case_status_norm LowCardinality(String) MATERIALIZED upperUTF8(trim(BOTH ' ' FROM case_status)),
   received_date    Date,
   decision_date    Nullable(Date),
   employer_name    String,
   employer_fein    Nullable(String),
   soc_code         LowCardinality(String),
   worksite_state   LowCardinality(String),
-  wage_offer       Nullable(Decimal(12,2)),
+  wage_offer       Nullable(Decimal(14,2)),
   country_of_citizenship LowCardinality(String),
   class_of_admission LowCardinality(String),
   fiscal_year      UInt16,
   source_file      LowCardinality(String),
-  -- Nullable Int32, not UInt16. A pending case has no decision date, and the
-  -- spec's column silently reports a wrapped or clamped garbage value for every
-  -- one of them. Pending cases are a large share of recent fiscal years and are
-  -- the interesting ones. See REVIEW A7.
+  -- Nullable Int32, not UInt16. A pending case has no decision date, and the spec's
+  -- column stores 45,447 for such a row. Verified. See REVIEW A7.
   days_to_decision Nullable(Int32) MATERIALIZED
     if(decision_date IS NULL, NULL, dateDiff('day', received_date, decision_date))
 ) ENGINE = MergeTree
@@ -87,8 +125,6 @@ CREATE TABLE IF NOT EXISTS visa_bulletin (
   country_chg       LowCardinality(String),
   final_action_date Nullable(Date),
   filing_date       Nullable(Date),
-  is_current_note   LowCardinality(String)   -- 'C' / 'U' / '' as published
-  -- is_current dropped: a mutable flag in a MergeTree needs an ALTER UPDATE
-  -- mutation to maintain. Derive it from max(bulletin_month) instead.
+  is_current_note   LowCardinality(String)
 ) ENGINE = MergeTree
 ORDER BY (category, country_chg, bulletin_month);
