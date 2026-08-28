@@ -28,24 +28,61 @@ from `docs/REVIEW.md` that changes a number:
 - a missing rule param raises instead of coercing to null (B5)
 - `inputs_hash` does not move when only the calendar moves (B6)
 
-## What is NOT verified
+## What has now been executed
 
-**None of the SQL has been executed.** No Postgres and no running Docker daemon were
-available when this was written. The DDL in `db/` and `clickhouse/` is unrun. Expect
-to fix something on the first `make migrate`.
+The SQL is no longer unrun. Against Postgres 17 and ClickHouse 26.7.5 in
+`infra/data.compose.yml`:
 
-Order of business:
-
-```bash
-make -f Makefile.data up
-make -f Makefile.data migrate      # 0001..0006, in order
-make -f Makefile.data seed         # param shapes MUST load before rules
-make -f Makefile.data ch-ddl       # views before data. REVIEW A5.
+```
+db/migrations/0001..0006      6/6 applied clean on first run
+db/seeds/010, 020            applied; 13 rules, 2 supersession chains, all unverified
+clickhouse/ddl/010, 020, 030 applied; 4 materialized views created
+clickhouse/queries/*.sql     all execute
+engine/tests                 24 passed
+contracts/validate.py        contract green
 ```
 
-The seed deliberately leaves every rule unverified, so the API returns
-`verified: false` and the UI renders its warning band. Do not fill `verified_by`
-without opening the primary source.
+Behaviour, not just syntax. Each of these was run and checked:
+
+| Check | Result |
+|---|---|
+| STEM OPT primary period accepted | ok |
+| CAP_GAP stacked on top, overlapping it | **accepted** |
+| AOS_PENDING also stacked | **accepted** |
+| A second overlapping primary status | rejected, 23P01 |
+| Two overlapping CAP_GAP periods | rejected, 23P01 |
+| CAP_GAP mislabelled as `layer='primary'` | rejected, check constraint |
+| A forked `supersedes` chain | rejected, `one_successor_per_rule` |
+| Overlapping rule effective windows | rejected, `no_overlapping_rule_windows` |
+| `{"dayz":60}` instead of `{"days":60}` | rejected, param-shape trigger |
+| Superseding a different `rule_key` | rejected, trigger |
+
+Three findings, proven with numbers rather than argued:
+
+- **A8, wage annualisation.** A row with unit `PER HOUR` annualises to NULL and is
+  excluded; a `$150,000/hour` typo is flagged `wage_suspect` and excluded. Under the
+  spec's `multiIf` the first would have entered the distribution as a $52 annual
+  salary and the second as $312,000,000.
+- **A7, `days_to_decision`.** A pending PERM case now yields NULL. The spec's
+  `UInt16` column stores **45,447** for the same row.
+- **A1, replay.** On identical data, the spec's `argMaxIf` query returns **zero
+  rows** for the pending grace-period change, and `clickhouse/queries/replay_diff.sql`
+  returns both users with `days_lost` of 60 and 41 and `newly_critical` set.
+
+## What is still NOT verified
+
+- **The API has never served a computed clock.** Every route in `api/main.py` returns
+  a fixture with a `_warning` field. Nothing is wired to the engine or to Postgres.
+- **RLS has never been exercised through the API.** The policies exist and apply, but
+  no request has set the `status_clock.subject` GUC.
+- **No real OFLC file has been loaded.** `ingest/load.py --dry-run` was tested against
+  synthetic CSVs only. The column maps in `ingest/column_maps.py` are still guesses;
+  run `python -m ingest.headers` on a real file first.
+- **`employer_fein` and `worksite_msa` are 100% missing** in the synthetic data, which
+  proves the quality query works and says nothing about the real corpus. Check it.
+- **PeerDB has not been attempted.**
+- **Every rule is unverified against its primary source.** That is deliberate and the
+  UI depends on it, but E2, E3 and E4 are yours to close.
 
 ## Then, in order
 
