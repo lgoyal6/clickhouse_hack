@@ -6,6 +6,7 @@ else. See `docs/OWNERSHIP.md`.
 ## First thing
 
 ```bash
+pip install -r agents/requirements.txt
 make -f Makefile.chat verify     # 8 tool-contract tests + the contract check
 make -f Makefile.chat web        # then open http://localhost:5173/web/
 ```
@@ -40,10 +41,28 @@ measures 2.90:1 and the spec sets the citation at 11px in it; and `--clear-text`
 
 ## What is NOT verified
 
-The LibreChat container has never been started. `librechat.yaml` is unrun, the MCP
-server in `agents/mcp/status_clock.py` raises `NotImplementedError` on every call,
-and the model id needs checking against the current list before you pin it
-(REVIEW H1).
+`agents/mcp/status_clock.py` is wired now: real HTTP calls, and every response is
+validated against the tool's own `outputSchema` before it's returned (raises,
+doesn't pass through, if provenance is missing). Confirmed end-to-end over real
+MCP stdio with `--list` and a live tool call against `list_tools`/`call_tool`
+(the call correctly surfaced a connection error as `is_error: true`, since
+Person A's API isn't running — that's the expected failure mode, not a bug).
+
+Still not verified:
+- **The LibreChat container has never been started.** Blocked on
+  `ANTHROPIC_API_KEY` (only the user can supply it) and `CH_READONLY_PASSWORD`
+  (Person A's, from `clickhouse/ddl/090_readonly_user.sql` against their local
+  `infra/data.compose.yml` ClickHouse container — not the cloud instance).
+- **Untested: whether `ghcr.io/danny-avila/librechat-dev:latest` has Python and
+  `uvx` at all.** `librechat.yaml`'s two `mcpServers` both run as `stdio` via
+  `command: python` / `command: uvx` *inside* that container. If the image is a
+  bare Node runtime, neither MCP server starts regardless of credentials. Check
+  with `docker run --rm --entrypoint sh ghcr.io/danny-avila/librechat-dev:latest
+  -c "python3 --version; which uvx"` before assuming credentials are the only
+  blocker — attempted this session, blocked by a DNS/network issue in that
+  environment rather than confirmed either way.
+- The model id needs checking against the current list before you pin it
+  (REVIEW H1).
 
 ## Then, in order
 

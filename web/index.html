@@ -24,6 +24,11 @@
   .notrunning li { font-family: var(--font-data); font-size: .75rem; color: var(--rule-text);
       list-style: none; margin-bottom: var(--space-1); }
   footer { max-width: 68rem; padding: var(--space-4); font-size: .75rem; color: var(--rule-text); }
+  .topnav { display: flex; gap: var(--space-4); max-width: 68rem; padding: var(--space-4) var(--space-4) 0; }
+  .topnav a { font-family: var(--font-display); font-size: .75rem; letter-spacing: .06em;
+      text-transform: uppercase; color: var(--rule-text); text-decoration: none;
+      padding-bottom: var(--space-2); border-bottom: 2px solid transparent; }
+  .topnav a[aria-current="page"] { color: var(--ink); border-color: var(--stamp); }
 </style>
 </head>
 <body>
@@ -32,6 +37,11 @@
   <h1>Status Clock</h1>
   <p class="meta" id="asof"></p>
 </header>
+
+<nav class="topnav" aria-label="Sections">
+  <a href="index.html" aria-current="page">Clock Wall</a>
+  <a href="ask.html">Ask</a>
+</nav>
 
 <!-- Persona switching is two sessions, not two user ids. The API has no route that
      accepts a user id; see contracts/openapi.yaml and docs/REVIEW.md D1. -->
@@ -71,8 +81,10 @@ async function load(session) {
 }
 
 function headline(c) {
-  if (c.kind === 'consumption') return `${c.days_consumed} / ${c.denominator}`;
-  if (c.kind === 'window')      return fmtDate(c.window_end).toUpperCase();
+  if (c.kind === 'consumption') {
+    return c.days_consumed == null ? 'Closed' : `${c.days_consumed} / ${c.denominator}`;
+  }
+  if (c.kind === 'window') return fmtDate(c.window_end).toUpperCase();
   return `${c.days_remaining}`;
 }
 
@@ -80,9 +92,19 @@ function subline(c) {
   // Three numbers, three labels. 216 is days remaining; the window is 243 days
   // long; 183 of those are the gain from the rule change. The spec's mock labels
   // days-remaining as "days of work authorization". See docs/REVIEW.md F3.
-  if (c.kind === 'consumption') return `${c.days_remaining} days remaining`;
+  //
+  // A closed clock (e.g. a filing window that already ended) carries
+  // days_remaining: null in the fixture. Rendering it unguarded prints the
+  // literal string "null days remaining" — a fabricated number, and one that
+  // reaches the accessible name too, in a product whose entire thesis is that
+  // every number traces to a citation. See docs/REVIEW.md F4-F5.
+  if (c.kind === 'consumption') {
+    return c.days_remaining == null ? 'Window closed' : `${c.days_remaining} days remaining`;
+  }
   if (c.kind === 'window') {
-    const parts = [`${c.days_remaining} days remaining`];
+    const parts = c.days_remaining == null
+      ? ['Window closed']
+      : [`${c.days_remaining} days remaining`];
     if (c.window_days) parts.push(`${c.window_days}-day window`);
     if (c.superseded?.delta_days) parts.push(`${c.superseded.delta_days} days gained`);
     return parts.join(' · ');
