@@ -69,9 +69,13 @@ verify:        ## engine + API + contract. Needs 'up migrate seed'.
 	python -m pytest engine/tests api/tests -q
 	python contracts/validate.py
 	@echo
-	@echo "Still unverified after this: no real OFLC file has been loaded, so the"
-	@echo "column maps in ingest/column_maps.py are still guesses, and no rule has"
-	@echo "been checked against its primary source."
+	@echo "Still unverified after this:"
+	@echo "  - the outbox is never drained to ClickHouse"
+	@echo "  - the population replay has never run on volume"
+	@echo "  - PERM, the visa bulletin and soc_embeddings are empty"
+	@echo "  - no alerts are generated or delivered"
+	@echo "  - no rule has been checked against its primary source"
+	@echo "See TRACK_DATA.md for the full list."
 
 reset:         ## destroy local data and start over
 	docker compose -f infra/data.compose.yml down -v
