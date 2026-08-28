@@ -1,0 +1,7 @@
+# track/data. Person B has no Python runtime dependency beyond pytest.
+fastapi>=0.115
+uvicorn[standard]>=0.32
+psycopg[binary]>=3.2
+pytest>=8.0
+jsonschema>=4.20
+pyyaml>=6.0

@@ -246,6 +246,13 @@
     },
     "engine_version": {
       "type": "string"
+    },
+    "corpus_context": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "Real-world context from the corpus, where the statutory number and the observed number differ enough to change what someone should do. Present on ac21_365: the statute needs a filing pending 365 days, and the median certified PERM takes 462. Carries its own source block; never inferred."
     }
   },
   "allOf": [
