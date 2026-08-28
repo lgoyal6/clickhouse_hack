@@ -1,0 +1,24 @@
+{
+  "scenario_id": "rule:h1b_grace_0d",
+  "clock_key": "h1b_grace_period",
+  "as_of": "2026-08-28",
+  "rows_scanned": 0,
+  "elapsed_ms": 0,
+  "diffs": [
+    {
+      "subject_ref": "sub_7f3a",
+      "under_actual": 60,
+      "under_scenario": 0,
+      "days_lost": 60,
+      "newly_critical": true
+    },
+    {
+      "subject_ref": "sub_2b91",
+      "under_actual": 41,
+      "under_scenario": 0,
+      "days_lost": 41,
+      "newly_critical": true
+    }
+  ],
+  "_fixture_note": "rows_scanned and elapsed_ms are zero on purpose. Fill them from a real run; they are the numbers that belong on the architecture slide, and inventing them would be the one lie this project cannot afford."
+}

@@ -1,0 +1,24 @@
+{
+  "soc_code": "31-1120",
+  "soc_title": "Home Health and Personal Care Aides",
+  "state": "CA",
+  "fiscal_year": 2026,
+  "wage": 62400.0,
+  "percentile": 68.4,
+  "n_filings": 1847,
+  "quantiles": {
+    "p10": 41600,
+    "p25": 48880,
+    "p50": 56160,
+    "p75": 66560,
+    "p90": 78000
+  },
+  "wage_level": 2,
+  "next_level_wage": 71110.0,
+  "source": {
+    "dataset": "DOL OFLC LCA Disclosure Data",
+    "coverage": "FY2024-FY2026, CERTIFIED only",
+    "retrieved_at": "2026-08-27"
+  },
+  "_fixture_note": "Numbers here are placeholders with plausible shape. They MUST be replaced by real query output before any demo; a fabricated percentile in this product is the exact harm it exists to prevent."
+}

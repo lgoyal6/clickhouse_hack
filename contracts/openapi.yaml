@@ -1,0 +1,323 @@
+openapi: 3.1.0
+info:
+  title: Status Clock API
+  version: 0.1.0
+  description: |
+    The seam between the two tracks.
+
+    Person A implements this. Person B consumes it and never touches Postgres or
+    ClickHouse directly, except for the read-only ClickHouse MCP connection that A
+    provisions.
+
+    Two rules that are not negotiable, both from docs/REVIEW.md:
+
+    1. **No endpoint takes a user identity as a parameter.** The subject comes from
+       the session, always. `user_id` as a caller-supplied argument is an IDOR with a
+       language model holding the parameter (finding D1). Persona switching in the
+       demo uses two sessions, not two UUIDs.
+    2. **Every numeric response carries provenance**, enforced by the schema rather
+       than by a prompt (finding H2). There is no response shape in this file that
+       lets a number travel without its citation.
+
+servers:
+  - url: http://localhost:8000
+    description: Person A's local API. Person B's only backend dependency.
+
+security:
+  - sessionCookie: []
+
+paths:
+  /v1/clocks:
+    get:
+      operationId: getMyClocks
+      summary: Every active clock for the authenticated subject, with provenance.
+      description: |
+        Backs the Clock Wall and the agent's `get_my_clocks` tool. Sorted by urgency,
+        never alphabetically. Takes no identity parameter by design.
+      parameters:
+        - name: as_of
+          in: query
+          required: false
+          schema: { type: string, format: date }
+          description: Defaults to today. Set it to demo the same facts under a different date.
+        - name: locale
+          in: query
+          required: false
+          schema: { type: string, default: en }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [as_of, clocks, disclaimer]
+                properties:
+                  as_of: { type: string, format: date }
+                  clocks:
+                    type: array
+                    items: { $ref: "./clock.schema.json" }
+                  needs_attention:
+                    type: integer
+                    description: Count of clocks at warn or critical.
+                  disclaimer:
+                    type: string
+                    description: Information, not legal advice. Rendered once, never repeated.
+
+  /v1/rules/{rule_key}:
+    get:
+      operationId: explainRule
+      summary: The governing version plus the complete version chain.
+      description: Backs Rule Detail and the agent's `explain_rule` tool.
+      parameters:
+        - name: rule_key
+          in: path
+          required: true
+          schema: { type: string }
+        - name: as_of
+          in: query
+          required: false
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [rule_key, governing, chain]
+                properties:
+                  rule_key: { type: string }
+                  governing:
+                    $ref: "#/components/schemas/RuleVersion"
+                  chain:
+                    type: array
+                    description: Newest first, walked through `supersedes`. A gap here is a bug, not a display state.
+                    items: { $ref: "#/components/schemas/RuleVersion" }
+
+  /v1/claims/check:
+    post:
+      operationId: checkClaim
+      summary: Match a claim someone was told against the rule version table.
+      description: |
+        Backs the agent's `check_claim` tool and the stale-advice beat. The interesting
+        answer is not true/false; it is "that was true until this date".
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                text: { type: string, description: "What the DSO, forum, or handout said." }
+                rule_key: { type: string, description: "Optional hint. Resolved from text when absent." }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [verdict, matched_version, governing_version]
+                properties:
+                  verdict:
+                    type: string
+                    enum: [current, superseded, never_correct, no_match]
+                  matched_version:
+                    oneOf:
+                      - $ref: "#/components/schemas/RuleVersion"
+                      - type: "null"
+                  governing_version:
+                    $ref: "#/components/schemas/RuleVersion"
+                  superseded_on: { type: [string, "null"], format: date }
+                  match_confidence: { type: number, minimum: 0, maximum: 1 }
+
+  /v1/corpus/wage-percentile:
+    get:
+      operationId: wagePercentile
+      summary: Exact position of a wage in the certified LCA distribution.
+      description: |
+        Computed as an exact scan, not interpolated from stored quantile states; see
+        docs/REVIEW.md A6. Returns both the percentile and the wage-level context,
+        because the lottery mechanism is level-based and the percentile is context
+        rather than the answer; see finding B10.
+      parameters:
+        - { name: soc_code, in: query, required: true, schema: { type: string } }
+        - { name: state, in: query, required: true, schema: { type: string } }
+        - { name: wage, in: query, required: true, schema: { type: number } }
+        - { name: fiscal_year, in: query, required: false, schema: { type: integer } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [soc_code, state, fiscal_year, wage, percentile, n_filings, quantiles, source]
+                properties:
+                  soc_code: { type: string }
+                  soc_title: { type: string }
+                  state: { type: string }
+                  fiscal_year: { type: integer }
+                  wage: { type: number }
+                  percentile: { type: number, minimum: 0, maximum: 100 }
+                  n_filings: { type: integer, description: "Sample size. Render it; a percentile over 11 filings is not a percentile." }
+                  quantiles:
+                    type: object
+                    properties:
+                      p10: { type: number }
+                      p25: { type: number }
+                      p50: { type: number }
+                      p75: { type: number }
+                      p90: { type: number }
+                  wage_level:
+                    type: [integer, "null"]
+                    minimum: 1
+                    maximum: 4
+                    description: "OES level for this offer, if prevailing wage data is loaded. Null until then; do not fabricate."
+                  next_level_wage:
+                    type: [number, "null"]
+                    description: "Wage that crosses into the next level. Powers 'what would move me a tier'."
+                  source:
+                    type: object
+                    required: [dataset, coverage, retrieved_at]
+                    properties:
+                      dataset: { type: string, example: "DOL OFLC LCA Disclosure Data" }
+                      coverage: { type: string, example: "FY2024-FY2026, CERTIFIED only" }
+                      retrieved_at: { type: string, format: date }
+
+  /v1/scenarios/replay:
+    post:
+      operationId: replayScenario
+      summary: Recompute clocks under a hypothetical rule set and diff against actual.
+      description: |
+        The query the architecture argument rests on, done as a write rather than a
+        read; see docs/REVIEW.md A1. Same code path as the agent's `what_if` tool.
+        Scope `subject: me` for one person, `subject: population` for the operator
+        view.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [scenario_id, clock_key, overrides, subject]
+              properties:
+                scenario_id:
+                  type: string
+                  example: "rule:h1b_grace_0d"
+                  description: Written into clock_evaluations.scenario_id.
+                clock_key: { type: string }
+                subject: { type: string, enum: [me, population] }
+                overrides:
+                  type: object
+                  description: 'Rule params to substitute. `{"days": 0}` eliminates the grace period.'
+                as_of: { type: string, format: date }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [scenario_id, clock_key, as_of, diffs]
+                properties:
+                  scenario_id: { type: string }
+                  clock_key: { type: string }
+                  as_of: { type: string, format: date }
+                  rows_scanned: { type: integer, description: "Put this on the architecture slide." }
+                  elapsed_ms: { type: number }
+                  diffs:
+                    type: array
+                    items:
+                      type: object
+                      required: [subject_ref, under_actual, under_scenario, days_lost]
+                      properties:
+                        subject_ref: { type: string, description: "Opaque handle, not an email. Resolvable only within the session." }
+                        under_actual: { type: integer }
+                        under_scenario: { type: integer }
+                        days_lost: { type: integer }
+                        newly_critical: { type: boolean }
+
+  /v1/facts:
+    post:
+      operationId: recordFact
+      summary: Write an extracted date, and echo it back for confirmation.
+      description: |
+        Backs the agent's `record_fact` tool. Always returns what was written so the
+        Intake surface can show its work. `confidence` starts at `inferred` or
+        `user_stated`; only an explicit confirmation promotes it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, payload]
+              properties:
+                kind:
+                  type: string
+                  enum: [status_period, employment_episode, gc_milestone, document]
+                payload: { type: object }
+                source_doc_id: { type: [string, "null"], format: uuid }
+                confidence:
+                  type: string
+                  enum: [document_verified, user_stated, inferred]
+      responses:
+        "201":
+          description: Written
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, kind, written, needs_confirmation]
+                properties:
+                  id: { type: string, format: uuid }
+                  kind: { type: string }
+                  written: { type: object, description: "Exactly what landed, read back from the row." }
+                  needs_confirmation: { type: boolean }
+        "409":
+          description: |
+            Rejected by a database constraint. The message is user-facing copy, per the
+            spec's copy rules: what went wrong and what to do.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error, message]
+                properties:
+                  error: { type: string, enum: [overlapping_status, duplicate_milestone, invalid_dates] }
+                  message:
+                    type: string
+                    example: "These dates overlap an existing status period ending 12 Mar 2026. Adjust one of them."
+                  conflicting_id: { type: [string, "null"], format: uuid }
+
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: sc_session
+      description: |
+        The authenticated subject. Every endpoint derives identity from this and
+        nothing else. There is deliberately no way to pass a user id.
+
+  schemas:
+    RuleVersion:
+      type: object
+      required: [rule_id, rule_key, effective_from, params, citation, authority, source_url, verified]
+      properties:
+        rule_id: { type: string, format: uuid }
+        rule_key: { type: string }
+        effective_from: { type: string, format: date }
+        effective_to: { type: [string, "null"], format: date }
+        params: { type: object }
+        citation: { type: string }
+        authority: { type: string }
+        source_url: { type: string, format: uri }
+        supersedes: { type: [string, "null"], format: uuid }
+        note: { type: [string, "null"] }
+        verified: { type: boolean }
+        verified_by: { type: [string, "null"] }
+        verified_at: { type: [string, "null"], format: date-time }

@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://status-clock.dev/contracts/clock.schema.json",
+  "title": "Clock",
+  "description": "One countdown, with its provenance attached. The provenance fields are required by the schema so that a caller (UI or agent) physically cannot receive a number without its citation. See docs/REVIEW.md H2.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "clock_key",
+    "label",
+    "kind",
+    "severity",
+    "as_of",
+    "provenance"
+  ],
+  "properties": {
+    "clock_key": {
+      "type": "string",
+      "enum": [
+        "opt_unemployment",
+        "cap_gap_window",
+        "h1b_grace_period",
+        "ac21_365",
+        "i485_portability",
+        "h1b_max_stay",
+        "opt_filing_window"
+      ],
+      "description": "Canonical clock list. The engine and the UI both read this enum; see docs/REVIEW.md B8, which is the finding this enum exists to close."
+    },
+    "label": { "type": "string", "description": "Human name, in the caller's locale. 'Unemployment days', not 'gap accumulation metric'." },
+    "kind": {
+      "type": "string",
+      "enum": ["consumption", "deadline", "window"],
+      "description": "consumption = days used out of a ceiling. deadline = days until a date. window = an open/close interval."
+    },
+    "severity": { "type": "string", "enum": ["clear", "info", "warn", "critical"] },
+    "as_of": { "type": "string", "format": "date" },
+
+    "days_consumed": { "type": ["integer", "null"] },
+    "denominator": { "type": ["integer", "null"], "description": "The ceiling, for kind=consumption. 90 or 150 for opt_unemployment." },
+    "days_remaining": { "type": ["integer", "null"] },
+    "window_start": { "type": ["string", "null"], "format": "date" },
+    "window_end": { "type": ["string", "null"], "format": "date" },
+    "window_days": { "type": ["integer", "null"], "description": "Length of the window itself. Distinct from days_remaining; conflating them is docs/REVIEW.md F3." },
+
+    "derived": {
+      "type": "boolean",
+      "default": false,
+      "description": "true when the number is our arithmetic over a regulation rather than a figure stated in one. ac21_365 is derived. See docs/REVIEW.md E5."
+    },
+    "derivation": { "type": ["string", "null"], "description": "Shown to the user when derived=true. The arithmetic, in words." },
+
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rule_id", "rule_key", "citation", "authority", "effective_from", "source_url", "verified"],
+      "properties": {
+        "rule_id": { "type": "string", "format": "uuid" },
+        "rule_key": { "type": "string" },
+        "citation": { "type": "string", "examples": ["8 CFR 214.2(f)(10)"] },
+        "authority": {
+          "type": "string",
+          "enum": ["Federal Register", "8 CFR", "INA", "USCIS Policy Manual", "ICE SEVP Guidance"],
+          "description": "Widened from the spec's three values to include SEVP guidance; see docs/REVIEW.md E3."
+        },
+        "effective_from": { "type": "string", "format": "date" },
+        "effective_to": { "type": ["string", "null"], "format": "date" },
+        "source_url": { "type": "string", "format": "uri" },
+        "verified": {
+          "type": "boolean",
+          "description": "false means verified_by is unset in the rules table. The UI MUST render the warning band. Never suppress this."
+        },
+        "verified_by": { "type": ["string", "null"] },
+        "verified_at": { "type": ["string", "null"], "format": "date-time" }
+      }
+    },
+
+    "superseded": {
+      "type": ["object", "null"],
+      "description": "Present when the governing rule supersedes an earlier version AND that earlier version was in force during a period relevant to this user. Drives the strikethrough. Chain-driven, not time-window-driven; see docs/REVIEW.md A2.",
+      "additionalProperties": false,
+      "required": ["rule_id", "citation", "effective_from", "superseded_on", "prior_value"],
+      "properties": {
+        "rule_id": { "type": "string", "format": "uuid" },
+        "citation": { "type": "string" },
+        "effective_from": { "type": "string", "format": "date" },
+        "superseded_on": { "type": "string", "format": "date" },
+        "prior_value": { "type": "string", "description": "The struck-through value, pre-rendered. 'SEP 30 2026'." },
+        "delta_days": { "type": ["integer", "null"], "description": "Days gained or lost versus the prior rule. Positive means the current rule is better for this user." }
+      }
+    },
+
+    "change_reason": {
+      "type": ["string", "null"],
+      "enum": ["facts_changed", "law_changed", "time_passed", null],
+      "description": "Why this differs from yesterday's evaluation. Three cases, not two; see docs/REVIEW.md B6. Derived from inputs_hash (facts) and rule_id (law) independently."
+    },
+
+    "engine_version": { "type": "string" }
+  }
+}

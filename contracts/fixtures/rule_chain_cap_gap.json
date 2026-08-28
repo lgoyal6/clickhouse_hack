@@ -1,0 +1,56 @@
+{
+  "rule_key": "cap_gap_end",
+  "governing": {
+    "rule_id": "b1e1a5f2-0000-4000-8000-000000000004",
+    "rule_key": "cap_gap_end",
+    "effective_from": "2025-01-17",
+    "effective_to": null,
+    "params": {
+      "end_rule": "APRIL_1"
+    },
+    "citation": "H-1B Modernization Final Rule",
+    "authority": "Federal Register",
+    "source_url": "https://www.federalregister.gov/documents/2024/12/18/2024-29354/modernizing-h-1b-requirements-providing-flexibility-in-the-f-1-program-and-program-improvements",
+    "supersedes": "b1e1a5f2-0000-4000-8000-000000000003",
+    "note": "Still mis-stated across published guidance.",
+    "verified": false,
+    "verified_by": null,
+    "verified_at": null
+  },
+  "chain": [
+    {
+      "rule_id": "b1e1a5f2-0000-4000-8000-000000000004",
+      "rule_key": "cap_gap_end",
+      "effective_from": "2025-01-17",
+      "effective_to": null,
+      "params": {
+        "end_rule": "APRIL_1"
+      },
+      "citation": "H-1B Modernization Final Rule",
+      "authority": "Federal Register",
+      "source_url": "https://www.federalregister.gov/documents/2024/12/18/2024-29354/modernizing-h-1b-requirements-providing-flexibility-in-the-f-1-program-and-program-improvements",
+      "supersedes": "b1e1a5f2-0000-4000-8000-000000000003",
+      "note": "Still mis-stated across published guidance.",
+      "verified": false,
+      "verified_by": null,
+      "verified_at": null
+    },
+    {
+      "rule_id": "b1e1a5f2-0000-4000-8000-000000000003",
+      "rule_key": "cap_gap_end",
+      "effective_from": "2008-04-08",
+      "effective_to": "2025-01-17",
+      "params": {
+        "end_rule": "SEPT_30"
+      },
+      "citation": "8 CFR 214.2(f)(5)(vi) (pre-2025)",
+      "authority": "8 CFR",
+      "source_url": "https://www.ecfr.gov/current/title-8/chapter-I/subchapter-B/part-214/section-214.2",
+      "supersedes": null,
+      "note": "Prior cap-gap end rule.",
+      "verified": false,
+      "verified_by": null,
+      "verified_at": null
+    }
+  ]
+}
