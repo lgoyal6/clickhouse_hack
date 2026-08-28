@@ -1,0 +1,38 @@
+# Person B's stack. Fully independent of the data track: no shared file, network, or
+# volume. Reaches Person A's API and ClickHouse over host.docker.internal, so either
+# side can be down without breaking the other.
+#
+#   docker compose -f librechat/chat.compose.yml up -d
+
+services:
+  librechat:
+    image: ghcr.io/danny-avila/librechat-dev:latest
+    ports: ["3080:3080"]
+    environment:
+      HOST: 0.0.0.0
+      MONGO_URI: mongodb://mongodb:27017/LibreChat
+      MEILI_HOST: http://meilisearch:7700
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      # Person A hands you this. Read-only ClickHouse user.
+      CH_READONLY_PASSWORD: ${CH_READONLY_PASSWORD}
+      STATUS_CLOCK_API: http://host.docker.internal:8000
+      CONFIG_PATH: /app/librechat.yaml
+    volumes:
+      - ./librechat.yaml:/app/librechat.yaml:ro
+      - ../agents:/app/agents:ro
+      - ./uploads:/app/client/public/images
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on: [mongodb, meilisearch]
+
+  mongodb:
+    image: mongo:7
+    volumes: ["./mongodb-data:/data/db"]
+    command: mongod --quiet --logpath /dev/null
+
+  meilisearch:
+    image: getmeili/meilisearch:v1.12
+    environment:
+      MEILI_NO_ANALYTICS: "true"
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-devonly}
+    volumes: ["./meili-data:/meili_data"]
