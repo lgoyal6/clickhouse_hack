@@ -106,13 +106,29 @@ def audit_units(rows: list[dict]) -> dict[str, int]:
 DATE_COLS = ("received_date", "decision_date", "begin_date", "end_date")
 NUM_COLS = ("wage_rate_from", "prevailing_wage")
 
-TARGET_COLS = (
-    "case_number", "case_status", "visa_class", "received_date", "decision_date",
-    "begin_date", "end_date", "employer_name", "employer_fein", "soc_code",
-    "soc_title", "job_title", "full_time", "worksite_city", "worksite_county",
-    "worksite_state", "wage_rate_from", "wage_unit", "prevailing_wage", "pw_unit",
-    "pw_level", "fiscal_year", "source_file",
-)
+TARGET_COLS = {
+    "lca": (
+        "case_number", "case_status", "visa_class", "received_date", "decision_date",
+        "begin_date", "end_date", "employer_name", "employer_fein", "soc_code",
+        "soc_title", "job_title", "full_time", "worksite_city", "worksite_county",
+        "worksite_state", "wage_rate_from", "wage_unit", "prevailing_wage", "pw_unit",
+        "pw_level", "fiscal_year", "source_file",
+    ),
+    "perm": (
+        "case_number", "case_status", "received_date", "decision_date",
+        "occupation_type", "employer_name", "employer_fein", "employer_state",
+        "employer_num_payroll", "soc_code", "soc_title", "job_title",
+        "wage_from", "wage_to", "wage_unit", "worksite_city", "worksite_county",
+        "worksite_state", "worksite_bls_area", "fiscal_year", "source_file",
+    ),
+}
+
+TABLES = {"lca": "lca_filings", "perm": "perm_filings"}
+
+NUM_COLS_BY_DATASET = {
+    "lca": ("wage_rate_from", "prevailing_wage"),
+    "perm": ("wage_from", "wage_to", "employer_num_payroll"),
+}
 
 
 def _date(v: str | None) -> str:
@@ -135,6 +151,9 @@ def _num(v: str | None) -> str:
 
 
 def insert(rows: list[dict], args, colmap: dict) -> int:
+    cols = TARGET_COLS[args.dataset]
+    numeric = NUM_COLS_BY_DATASET[args.dataset]
+    table = TABLES[args.dataset]
     """Stream rows to ClickHouse as TSV with \\N for nulls.
 
     TSV rather than CSV because the free-text columns in this corpus contain commas,
@@ -150,20 +169,20 @@ def insert(rows: list[dict], args, colmap: dict) -> int:
     lines = []
     for r in rows:
         out = []
-        for col in TARGET_COLS:
+        for col in cols:
             if col == "fiscal_year":
                 out.append(str(args.fiscal_year))
             elif col == "source_file":
                 out.append(args.path.name)
             elif col in DATE_COLS:
                 out.append(_date(r.get(col)))
-            elif col in NUM_COLS:
+            elif col in numeric:
                 out.append(_num(r.get(col)))
             else:
                 out.append(esc(r.get(col)))
         lines.append("\t".join(out))
 
-    query = f"INSERT INTO lca_filings ({', '.join(TARGET_COLS)}) FORMAT TabSeparated"
+    query = f"INSERT INTO {table} ({', '.join(cols)}) FORMAT TabSeparated"
     # Chunked so a 118k-row file does not become one 60 MB request body.
     sent = 0
     for i in range(0, len(lines), 20_000):
@@ -177,7 +196,7 @@ def insert(rows: list[dict], args, colmap: dict) -> int:
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("path", type=pathlib.Path)
-    ap.add_argument("--dataset", default="lca", choices=["lca"])
+    ap.add_argument("--dataset", default="lca", choices=["lca", "perm"])
     ap.add_argument("--fiscal-year", type=int, required=True)
     ap.add_argument("--host", default="localhost")
     ap.add_argument("--password", default="devonly")
@@ -187,13 +206,13 @@ def main(argv: list[str]) -> int:
 
     colmap = map_for(args.dataset, args.fiscal_year)
 
-    if not args.dry_run:
+    if not args.dry_run and args.dataset == "lca":
         check_order(args.host, args.password)
 
     rows = list(read_rows(args.path, colmap))
     print(f"{len(rows)} rows read from {args.path.name}")
 
-    # The wage-unit gate.
+    # The wage-unit gate. Both datasets normalise to a canonical wage_unit key.
     units = audit_units(rows)
     unknown = {u: n for u, n in units.items() if u not in KNOWN_WAGE_UNITS}
     print("\nwage_unit distribution:")
@@ -220,7 +239,7 @@ def main(argv: list[str]) -> int:
         return 0
 
     inserted = insert(rows, args, colmap)
-    print(f"\ninserted {inserted:,} rows into lca_filings "
+    print(f"\ninserted {inserted:,} rows into {TABLES[args.dataset]} "
           f"(fiscal_year={args.fiscal_year}, source_file={args.path.name})")
     print("\nNow run:  make -f Makefile.data quality")
     return 0

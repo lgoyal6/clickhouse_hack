@@ -79,13 +79,82 @@ KNOWN_WAGE_UNITS = {
 }
 
 
+MAPS = {"lca": None, "perm": None}   # populated below
+
+
 def map_for(dataset: str, fiscal_year: int) -> dict:
-    if dataset != "lca":
+    table = {"lca": LCA_MAPS, "perm": PERM_MAPS}.get(dataset)
+    if table is None:
         raise NotImplementedError(f"no column map for {dataset!r} yet")
     try:
-        return LCA_MAPS[fiscal_year]
+        return table[fiscal_year]
     except KeyError:
         raise KeyError(
-            f"no LCA column map for FY{fiscal_year}. Print the headers and add one "
-            f"rather than guessing; see ingest/README.md."
+            f"no {dataset.upper()} column map for FY{fiscal_year}. Print the headers "
+            f"and add one rather than guessing; see ingest/README.md."
         ) from None
+
+
+# ---------------------------------------------------------------- PERM ----------
+#
+# Verified against the real FY2025 Q4 file: 137 columns, and NOT a variation of the
+# LCA layout. Employer columns are EMP_*, not EMPLOYER_*; the SOC lives in
+# PWD_SOC_CODE; the wage is JOB_OPP_WAGE_FROM with its own JOB_OPP_WAGE_PER unit.
+#
+# Two columns docs/BUILD_SPEC.md 4 models and the file DOES NOT HAVE:
+#   country_of_citizenship, class_of_admission
+# Both existed in older PERM vintages and are gone. Anything keyed on them returns
+# nothing.
+
+PERM_MODERN = {
+    "case_number":          "CASE_NUMBER",
+    "case_status":          "CASE_STATUS",
+    "received_date":        "RECEIVED_DATE",
+    "decision_date":        "DECISION_DATE",
+    "occupation_type":      "OCCUPATION_TYPE",
+    "employer_name":        "EMP_BUSINESS_NAME",
+    "employer_fein":        "EMP_FEIN",
+    "employer_state":       "EMP_STATE",
+    "employer_num_payroll": "EMP_NUM_PAYROLL",
+    "soc_code":             "PWD_SOC_CODE",
+    "soc_title":            "PWD_SOC_TITLE",
+    "job_title":            "JOB_TITLE",
+    "wage_from":            "JOB_OPP_WAGE_FROM",
+    "wage_to":              "JOB_OPP_WAGE_TO",
+    "wage_unit":            "JOB_OPP_WAGE_PER",
+    "worksite_city":        "PRIMARY_WORKSITE_CITY",
+    "worksite_county":      "PRIMARY_WORKSITE_COUNTY",
+    "worksite_state":       "PRIMARY_WORKSITE_STATE",
+    # The metro-level geography the LCA files do not carry at all. REVIEW C3.
+    "worksite_bls_area":    "PRIMARY_WORKSITE_BLS_AREA",
+}
+
+# FY2024 is a DIFFERENT LAYOUT AGAIN, in the same dataset, one fiscal year apart.
+# Employer columns are EMPLOYER_*, the SOC is PW_SOC_CODE rather than PWD_SOC_CODE,
+# the wage is WAGE_OFFER_FROM rather than JOB_OPP_WAGE_FROM, and there is no BLS area
+# column at all. The loader refused the file rather than mismapping it, which is the
+# whole point of the header gate. docs/REVIEW.md C1, confirmed at its strongest: the
+# schema moves between CONSECUTIVE fiscal years within one dataset.
+PERM_FY2024 = {
+    "case_number":          "CASE_NUMBER",
+    "case_status":          "CASE_STATUS",
+    "received_date":        "RECEIVED_DATE",
+    "decision_date":        "DECISION_DATE",
+    "occupation_type":      None,
+    "employer_name":        "EMPLOYER_NAME",
+    "employer_fein":        "EMPLOYER_FEIN",
+    "employer_state":       "EMPLOYER_STATE_PROVINCE",
+    "employer_num_payroll": "EMPLOYER_NUM_EMPLOYEES",
+    "soc_code":             "PW_SOC_CODE",
+    "soc_title":            "PW_SOC_TITLE",
+    "job_title":            "JOB_TITLE",
+    "wage_from":            "WAGE_OFFER_FROM",
+    "wage_to":              "WAGE_OFFER_TO",
+    "wage_unit":            "WAGE_OFFER_UNIT_OF_PAY",
+    "worksite_city":        "WORKSITE_CITY",
+    "worksite_county":      None,
+    "worksite_state":       "WORKSITE_STATE",
+    "worksite_bls_area":    None,     # absent in this vintage
+}
+
+PERM_MAPS = {2024: PERM_FY2024, 2025: PERM_MODERN}
