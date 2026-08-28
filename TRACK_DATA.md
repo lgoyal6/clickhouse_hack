@@ -8,7 +8,8 @@ You own `db/`, `clickhouse/`, `engine/`, `ingest/`, `api/`, `infra/data.compose.
 ```bash
 make -f Makefile.data deps up migrate seed ch-ddl
 make -f Makefile.data corpus     # fetch + convert + load FY2024 and FY2025, then gate
-make -f Makefile.data verify     # 70 tests + the contract check
+make -f Makefile.data replicate  # drain the outbox into ClickHouse
+make -f Makefile.data verify     # 86 tests + the contract check
 make -f Makefile.data demo       # both personas' clocks, computed, from the API
 ```
 
@@ -76,9 +77,12 @@ db/migrations/0001..0007     applied clean
 db/seeds/010, 020, 030       13 rules, 2 supersession chains, 2 personas
 clickhouse/ddl/010,020,030   5 materialized views, all populating
 corpus                       239,477 rows / 216,775 certified / FY2024 Q4 + FY2025 Q4
-data_quality.sql             10 gates, all pass
-engine/tests                 28 passed   (no database)
-api/tests                    42 passed   (real Postgres, real ClickHouse, real routes)
+data_quality.sql             12 gates, all pass
+clocks                       7 of 7 implemented
+rules                        12 of 13 signed off; lottery_selection flagged on purpose
+replication                  56 evaluations / 3 days / 3 scenarios in ClickHouse
+engine/tests                 39 passed   (no database)
+api/tests                    47 passed   (real Postgres, real ClickHouse, real routes)
 contracts/validate.py        contract green
 ```
 
@@ -102,42 +106,58 @@ test:
 | `days_to_decision UInt16` | pending PERM case reads 45,447 days |
 | `$150k/hour` typo | $312,000,000 in the wage distribution |
 
+**Standing.** `GET /v1/standing` takes no parameters. It reads the person's own
+occupation, state and wage from Postgres under RLS and asks the corpus where that
+wage sits, so the agent never has to assemble a SOC code itself.
+
+```
+STANDING  Bay Area Community College
+  Health Specialties Teachers, Postsecondary  CA  $92,000/yr
+  14.6th percentile of 48 certified filings
+  OES level 1   $99,987 would move you a tier
+
+  SELECTION METHOD: WAGE_WEIGHTED
+  CITATION REQUIRED  ·  Federal Register  ·  eff. 2026-02-27
+  verified=False   <-- the warning band renders here
+```
+
+That last block is the point. 12 of 13 rules are signed off; `lottery_selection` is
+deliberately not, because the spec cites it with no Federal Register number and it
+powers this exact screen. One flagged card is the product telling you which of its own
+numbers it cannot stand behind.
+
+**Replication.** `python -m api.replicate` drains the Postgres outbox into
+`clock_evaluations`. At-least-once, idempotent, `FOR UPDATE SKIP LOCKED` so two
+drainers can run together. PeerDB is a faster version of this loop, not a different
+architecture, so the retained-history claim is real without it.
+
 ## What is still NOT verified
 
 - **`/v1/claims/check` is still a fixture.** It carries a `_warning`. Claim matching
-  needs exact/alias lookup first and vector search for the tail (REVIEW C5).
-- **The outbox is never drained.** Rows accumulate with `replicated_at IS NULL`;
-  nothing carries them to `clock_evaluations` in ClickHouse yet.
+  needs exact and alias lookup first, vector search for the tail (REVIEW C5).
 - **The population replay has never run on volume.** `/v1/scenarios/replay` returns
-  real `rows_scanned` and `elapsed_ms` for one person. Seed 50k synthetic users
-  before putting a number on the architecture slide.
-- **PeerDB has not been attempted.**
+  real `rows_scanned` and `elapsed_ms` for one person over 56 rows. Seed 50k synthetic
+  users before putting a number on the architecture slide.
+- **PeerDB has not been attempted.** `api/replicate.py` covers the same claim.
 - **No alerts are generated or delivered**, and `alert_templates` is empty.
 - **PERM and the Visa Bulletin are not loaded.** Both tables exist and are empty.
 - **`soc_embeddings` is empty.** No embedding step has been run (REVIEW C5).
-- **Only Q4 files are loaded**, one per fiscal year. They span the year by decision
-  date, but they are not the full quarterly set.
-- **Every rule is unverified against its primary source.** Deliberate, and the UI
-  depends on it, but E2, E3 and E4 are yours to close.
+- **Only Q4 files are loaded**, one per fiscal year.
+- **`lottery_selection` is unverified on purpose.** If you find the real Federal
+  Register citation, add it in a migration and the warning band disappears.
 
 ## Then, in order
 
-1. **Drain the outbox to ClickHouse.** A loop that selects `WHERE replicated_at IS
-   NULL`, inserts into `clock_evaluations`, and stamps the rows. That is a real CDC
-   path and it is maybe twenty minutes. PeerDB is an upgrade, not a prerequisite.
-2. **Seed 50k synthetic users and measure the population replay.** Run
+1. **Seed 50k synthetic users and measure the population replay.** Run
    `clickhouse/queries/replay_diff.sql` with and without the `by_clock` projection and
-   put both timings on the architecture slide. One measured number beats three
-   paragraphs of "runs in seconds in ClickHouse".
-3. **Decide the Standing-screen persona with Person B.** The corpus cannot answer for
-   a home health aide. Either demo an occupation it covers, or demo the honest
-   refusal, which is a defensible and arguably stronger choice. What cannot happen is
-   the §8 script as written.
-4. **Generate alerts** in the same transaction as the evaluations, using
+   put both timings on the architecture slide. This is the single highest-value
+   remaining item for a database hackathon: one measured number beats three paragraphs
+   of "runs in seconds in ClickHouse".
+2. **Generate alerts** in the same transaction as the evaluations, using
    `template_key` plus params. Person B writes the reviewed Spanish.
-5. **Wire `/v1/claims/check`.** Exact and alias match first, vector search for the
-   tail. It is the stale-advice beat and it is currently a fixture.
-6. **Load PERM** if there is time. `perm_filings` exists and `days_to_decision` is
+3. **Wire `/v1/claims/check`.** It is the stale-advice beat and it is still a fixture.
+   Exact and alias match first, vector search for the tail.
+4. **Load PERM** if there is time. `perm_filings` exists and `days_to_decision` is
    already correct for pending cases.
 
 ## Your review findings
@@ -148,9 +168,13 @@ B8, B9 and B10 need a joint decision with Person B before either of you builds:
 the canonical clock list, whether the visa bulletin becomes a clock, and whether the
 lottery statistic is a percentile or a wage level.
 
-## Clocks not yet built
+## Clocks
 
-`h1b_grace_period`, `i485_portability`, `opt_filing_window`. They are listed in
-`engine/clocks/ALL_CLOCK_KEYS` and appear in `NOT_YET_IMPLEMENTED`, so the engine
-skips them without pretending. Add a module with `applies()` and `compute()` and
-register it.
+All seven are built: `opt_unemployment`, `cap_gap_window`, `h1b_grace_period`,
+`ac21_365`, `i485_portability`, `h1b_max_stay`, `opt_filing_window`.
+`engine/clocks/NOT_YET_IMPLEMENTED` is empty and a test asserts it stays that way.
+
+Each declares applicability, so the wall renders only what is running and gives a
+reason for the rest. Adding an eighth means a module with `applies()` and `compute()`,
+a rule in `db/seeds/020_rules.sql`, a label in `api/main.py`, and an entry in
+`ALL_CLOCK_KEYS`.
