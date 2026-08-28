@@ -24,9 +24,9 @@ KIND = "consumption"
 def applies(state, as_of: dt.date) -> tuple[bool, str]:
     period = _opt_period(state)
     if period is None:
-        return False, "no OPT or STEM OPT period on file"
+        return False, "no_opt_period"
     if period.ead_start is None:
-        return False, "OPT authorization start date not known; add the EAD"
+        return False, "no_ead_start"
     return True, ""
 
 

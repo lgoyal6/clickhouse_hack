@@ -18,7 +18,7 @@ KIND = "window"
 
 def applies(state, as_of: dt.date) -> tuple[bool, str]:
     if state.period("CAP_GAP") is None:
-        return False, "no cap-gap period on file (needs a pending cap-subject H-1B petition)"
+        return False, "no_cap_gap"
     return True, ""
 
 

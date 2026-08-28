@@ -46,15 +46,115 @@ DEMO_SESSIONS = {
     "sess_daniel": "00000000-0000-4000-8000-00000000d001",
 }
 
-LABELS = {
-    "opt_unemployment":   {"en": "Unemployment days",        "es": "Días de desempleo"},
-    "cap_gap_window":     {"en": "Cap-gap window",           "es": "Periodo cap-gap"},
-    "ac21_365":           {"en": "AC21 365-day threshold",   "es": "Umbral de 365 días AC21"},
-    "h1b_max_stay":       {"en": "H-1B maximum stay",        "es": "Estancia máxima H-1B"},
-    "h1b_grace_period":   {"en": "H-1B grace period",        "es": "Periodo de gracia H-1B"},
-    "i485_portability":   {"en": "I-485 portability",        "es": "Portabilidad I-485"},
-    "opt_filing_window":  {"en": "OPT filing window",        "es": "Ventana de solicitud OPT"},
+# Wording lives here, in every supported language. The engine returns codes.
+#
+# English is the DEFAULT. The user's stored locale is a preference surfaced in intake,
+# not something that silently decides what a visitor sees; the switcher decides, and
+# it defaults to English. Answering in someone's language is the product working, but
+# guessing at it is how a demo opens in a language the room does not read.
+LOCALES = {"en": "English", "es": "Español", "hi": "हिन्दी"}
+DEFAULT_LOCALE = "en"
+
+# Who the demo sessions are, for the UI. Names, not cookie values.
+DEMO_PEOPLE = {
+    "sess_maria": {
+        "name": "Maria O.",
+        "summary": {"en": "Home health aide · STEM OPT · H-1B pending, in cap-gap",
+                    "es": "Auxiliar de salud a domicilio · STEM OPT · H-1B pendiente, en cap-gap",
+                    "hi": "गृह स्वास्थ्य सहायक · STEM OPT · H-1B लंबित, कैप-गैप में"},
+    },
+    "sess_daniel": {
+        "name": "Daniel R.",
+        "summary": {"en": "Adjunct instructor · H-1B year five · nothing filed",
+                    "es": "Profesor adjunto · quinto año de H-1B · nada presentado",
+                    "hi": "सहायक प्राध्यापक · H-1B पाँचवाँ वर्ष · कुछ भी दायर नहीं"},
+    },
 }
+
+LABELS = {
+    "opt_unemployment":  {"en": "Unemployment days",
+                          "es": "Días de desempleo",
+                          "hi": "बेरोज़गारी के दिन"},
+    "cap_gap_window":    {"en": "Cap-gap window",
+                          "es": "Periodo cap-gap",
+                          "hi": "कैप-गैप अवधि"},
+    "h1b_grace_period":  {"en": "H-1B grace period",
+                          "es": "Periodo de gracia H-1B",
+                          "hi": "H-1B रियायती अवधि"},
+    "ac21_365":          {"en": "AC21 365-day threshold",
+                          "es": "Umbral de 365 días AC21",
+                          "hi": "AC21 365-दिन सीमा"},
+    "i485_portability":  {"en": "I-485 portability",
+                          "es": "Portabilidad I-485",
+                          "hi": "I-485 पोर्टेबिलिटी"},
+    "h1b_max_stay":      {"en": "H-1B maximum stay",
+                          "es": "Estancia máxima H-1B",
+                          "hi": "H-1B अधिकतम अवधि"},
+    "opt_filing_window": {"en": "OPT filing window",
+                          "es": "Ventana de solicitud OPT",
+                          "hi": "OPT आवेदन अवधि"},
+}
+
+# Why a clock is not running. "Not in H-1B status, so the six-year meter has not
+# started" is an answer; a zero is not.
+REASONS = {
+    "no_opt_period":     {"en": "No OPT or STEM OPT period on file",
+                          "es": "No hay periodo de OPT o STEM OPT registrado",
+                          "hi": "कोई OPT या STEM OPT अवधि दर्ज नहीं है"},
+    "no_ead_start":      {"en": "OPT start date not known. Add your EAD.",
+                          "es": "No se conoce la fecha de inicio del OPT. Agregue su EAD.",
+                          "hi": "OPT प्रारंभ तिथि ज्ञात नहीं है। अपना EAD जोड़ें।"},
+    "no_cap_gap":        {"en": "No cap-gap period on file. Needs a pending cap-subject H-1B petition.",
+                          "es": "No hay periodo cap-gap registrado. Requiere una petición H-1B sujeta al cupo pendiente.",
+                          "hi": "कोई कैप-गैप अवधि दर्ज नहीं है। एक लंबित कैप-अधीन H-1B याचिका आवश्यक है।"},
+    "not_h1b":           {"en": "Not in H-1B status, so the six-year meter has not started",
+                          "es": "No está en estatus H-1B, así que el contador de seis años no ha empezado",
+                          "hi": "H-1B स्थिति में नहीं हैं, इसलिए छह-वर्षीय गणना शुरू नहीं हुई है"},
+    "already_filed":     {"en": "A PERM or I-140 is already on file",
+                          "es": "Ya hay un PERM o I-140 presentado",
+                          "hi": "एक PERM या I-140 पहले से दायर है"},
+    "currently_employed": {"en": "Currently employed, so the grace period has not started",
+                          "es": "Actualmente empleado, así que el periodo de gracia no ha empezado",
+                          "hi": "वर्तमान में कार्यरत हैं, इसलिए रियायती अवधि शुरू नहीं हुई है"},
+    "no_i485":           {"en": "No I-485 on file, so portability has not started",
+                          "es": "No hay I-485 presentado, así que la portabilidad no ha empezado",
+                          "hi": "कोई I-485 दायर नहीं है, इसलिए पोर्टेबिलिटी शुरू नहीं हुई है"},
+    "no_program_end":    {"en": "No program end date on file. Add your I-20.",
+                          "es": "No hay fecha de fin de programa registrada. Agregue su I-20.",
+                          "hi": "कोई कार्यक्रम समाप्ति तिथि दर्ज नहीं है। अपना I-20 जोड़ें।"},
+    "opt_authorised":    {"en": "OPT is already authorised, so the filing window has closed",
+                          "es": "El OPT ya está autorizado, así que la ventana de solicitud se cerró",
+                          "hi": "OPT पहले से अधिकृत है, इसलिए आवेदन अवधि बंद हो चुकी है"},
+}
+
+UI_STRINGS = {
+    "as_of":            {"en": "As of", "es": "Al", "hi": "तिथि"},
+    "clocks":           {"en": "clocks", "es": "relojes", "hi": "काउंटडाउन"},
+    "needs_attention":  {"en": "needs attention", "es": "requiere atención",
+                         "hi": "ध्यान देने योग्य"},
+    "not_running":      {"en": "Not running yet", "es": "Aún no activos",
+                         "hi": "अभी सक्रिय नहीं"},
+    "days_remaining":   {"en": "days remaining", "es": "días restantes", "hi": "दिन शेष"},
+    "day_window":       {"en": "day window", "es": "días de duración", "hi": "दिन की अवधि"},
+    "days_gained":      {"en": "days gained", "es": "días ganados", "hi": "दिन अतिरिक्त"},
+    "unverified":       {"en": "Unverified against the primary source",
+                         "es": "No verificado contra la fuente primaria",
+                         "hi": "प्राथमिक स्रोत से असत्यापित"},
+    "why":              {"en": "Why this number", "es": "Por qué este número",
+                         "hi": "यह संख्या क्यों"},
+    "supersedes":       {"en": "supersedes rule of", "es": "reemplaza la regla de",
+                         "hi": "पूर्व नियम को प्रतिस्थापित करता है"},
+    "disclaimer":       {"en": "This is information, not legal advice.",
+                         "es": "Esto es información, no asesoría legal.",
+                         "hi": "यह जानकारी है, कानूनी सलाह नहीं।"},
+}
+
+
+def t(table: dict, key: str, locale: str) -> str:
+    """Translate, falling back to English rather than to a key name."""
+    entry = table.get(key) or {}
+    return entry.get(locale) or entry.get("en") or key
+
 
 KINDS = {
     "opt_unemployment": "consumption", "cap_gap_window": "window",
@@ -85,14 +185,15 @@ def serialise(clock: dict, locale: str) -> dict:
     correct outcome; an uncited number is not.
     """
     key = clock["clock_key"]
-    label = LABELS.get(key, {}).get(locale) or LABELS.get(key, {}).get("en") or key
+    label = t(LABELS, key, locale)
 
     if not clock["applicable"]:
         return {
             "clock_key": key, "label": label, "kind": KINDS.get(key, "deadline"),
             "severity": "info", "as_of": _iso(clock["as_of"]),
             "applicable": False,
-            "not_applicable_reason": clock["not_applicable_reason"],
+            "not_applicable_reason": t(REASONS, clock["not_applicable_reason"], locale),
+            "not_applicable_code": clock["not_applicable_reason"],
             "engine_version": clock["engine_version"],
         }
 
@@ -160,6 +261,16 @@ def root(sc_session: str | None = Cookie(default=None)):
     return RedirectResponse("/session/sess_maria", status_code=303)
 
 
+@app.get("/lang/{code}")
+def switch_language(code: str):
+    """Set the display language and return to the wall."""
+    if code not in LOCALES:
+        raise HTTPException(404, detail=f"unsupported locale {code!r}")
+    r = RedirectResponse("/ui/", status_code=303)
+    r.set_cookie("sc_lang", code, httponly=False, samesite="lax", path="/", max_age=31536000)
+    return r
+
+
 @app.get("/session/{name}")
 def switch_session(name: str):
     """Set the demo session cookie and return to the wall.
@@ -174,9 +285,30 @@ def switch_session(name: str):
     return r
 
 
+@app.get("/v1/locales")
+def locales():
+    """What the UI offers in its switcher."""
+    return {"default": DEFAULT_LOCALE,
+            "available": [{"code": c, "name": n} for c, n in LOCALES.items()]}
+
+
+def resolve_locale(param: str | None, cookie: str | None) -> str:
+    """Explicit choice, then the switcher's cookie, then English.
+
+    Deliberately NOT the user's stored locale. That is a preference captured during
+    intake and shown back to them; letting it silently pick the language means the
+    demo can open in a language the room does not read. The switcher decides.
+    """
+    for candidate in (param, cookie):
+        if candidate in LOCALES:
+            return candidate
+    return DEFAULT_LOCALE
+
+
 @app.get("/v1/clocks")
 def get_my_clocks(
     sc_session: str | None = Cookie(default=None),
+    sc_lang: str | None = Cookie(default=None),
     as_of: dt.date | None = Query(default=None),
     locale: str | None = Query(default=None),
 ):
@@ -196,7 +328,7 @@ def get_my_clocks(
 
         repo.write_outbox(conn, subject_id, clocks, day)
 
-    lang = locale or state.locale
+    lang = resolve_locale(locale, sc_lang)
     out = [serialise(c, lang) for c in clocks]
 
     # Corpus context for the one clock where the statute's number and the real-world
@@ -210,9 +342,18 @@ def get_my_clocks(
 
     return {
         "as_of": day.isoformat(),
+        "locale": lang,
+        "locales": [{"code": c, "name": n} for c, n in LOCALES.items()],
+        "person": {
+            "name": DEMO_PEOPLE.get(sc_session, {}).get("name", ""),
+            "summary": t(
+                {"s": DEMO_PEOPLE.get(sc_session, {}).get("summary", {})}, "s", lang),
+            "preferred_locale": state.locale,
+        },
+        "strings": {k: t(UI_STRINGS, k, lang) for k in UI_STRINGS},
         "clocks": out,
         "needs_attention": sum(1 for c in running if c["severity"] in ("warn", "critical")),
-        "disclaimer": DISCLAIMER,
+        "disclaimer": t(UI_STRINGS, "disclaimer", lang),
     }
 
 

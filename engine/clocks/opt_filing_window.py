@@ -22,10 +22,10 @@ def _program_end(state) -> dt.date | None:
 def applies(state, as_of: dt.date) -> tuple[bool, str]:
     end = _program_end(state)
     if end is None:
-        return False, "no program end date on file; add your I-20"
+        return False, "no_program_end"
     # Once OPT is authorised the filing window is history.
     if state.period("OPT") or state.period("STEM_OPT"):
-        return False, "OPT already authorised; the filing window has closed"
+        return False, "opt_authorised"
     return True, ""
 
 

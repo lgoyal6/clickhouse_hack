@@ -21,9 +21,9 @@ FILED = ("PERM_FILED", "I140_FILED", "I140_APPROVED", "PERM_APPROVED")
 
 def applies(state, as_of: dt.date) -> tuple[bool, str]:
     if state.h1b_first_entry is None:
-        return False, "not in H-1B status; the six-year meter has not started"
+        return False, "not_h1b"
     if state.has_milestone(*FILED):
-        return False, "a PERM or I-140 is already on file"
+        return False, "already_filed"
     return True, ""
 
 

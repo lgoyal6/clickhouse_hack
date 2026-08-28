@@ -159,6 +159,9 @@ def test_h1b_max_recaptures_absences(daniel, as_of, ruleset):
 def test_stem_opt_person_does_not_get_h1b_clocks(maria, as_of, ruleset):
     """The Clock Wall mock renders OPT and H-1B clocks for one person.
 
+    Reasons are CODES here, not sentences: the engine must stay language-free so the
+    API can render them in English, Spanish or Hindi.
+
     Nobody can be running both: someone in cap-gap is in F-1 status with a pending
     petition, so the six-year meter has not started and AC21 has nothing to extend.
     """
@@ -169,7 +172,7 @@ def test_stem_opt_person_does_not_get_h1b_clocks(maria, as_of, ruleset):
     not_running = {c["clock_key"]: c["not_applicable_reason"]
                    for c in clocks if not c["applicable"]}
     assert "ac21_365" in not_running
-    assert "six-year meter has not started" in not_running["ac21_365"]
+    assert not_running["ac21_365"] == "not_h1b"
 
 
 def test_h1b_person_does_not_get_opt_clocks(daniel, as_of, ruleset):
@@ -183,7 +186,7 @@ def test_ac21_disappears_once_something_is_filed(daniel, as_of, ruleset):
     filed = type(daniel)(**{**daniel.__dict__,
                             "milestones": (Milestone("PERM_FILED", D(2026, 3, 1)),)})
     ok, reason = ac21_365.applies(filed, as_of)
-    assert not ok and "already on file" in reason
+    assert not ok and reason == "already_filed"
 
 
 def test_ac21_is_marked_derived_and_shows_its_arithmetic(daniel, as_of, ruleset):
@@ -276,7 +279,7 @@ def test_demo_user_ids_are_real_uuids(maria, daniel):
 def test_grace_period_does_not_run_while_employed(daniel, as_of, ruleset):
     from engine.clocks import h1b_grace_period
     ok, reason = h1b_grace_period.applies(daniel, as_of)
-    assert not ok and "currently employed" in reason
+    assert not ok and reason == "currently_employed"
 
 
 def test_grace_period_counts_from_the_last_day_worked(daniel, as_of, ruleset):
@@ -310,7 +313,7 @@ def test_grace_period_is_the_replay_target(daniel, as_of, ruleset):
 def test_portability_needs_an_i485(daniel, as_of, ruleset):
     from engine.clocks import i485_portability
     ok, reason = i485_portability.applies(daniel, as_of)
-    assert not ok and "no I-485 on file" in reason
+    assert not ok and reason == "no_i485"
 
 
 def test_portability_counts_up_to_a_freedom(daniel, as_of, ruleset):
@@ -332,7 +335,7 @@ def test_portability_counts_up_to_a_freedom(daniel, as_of, ruleset):
 def test_filing_window_closes_once_opt_is_authorised(maria, as_of, ruleset):
     from engine.clocks import opt_filing_window
     ok, reason = opt_filing_window.applies(maria, as_of)
-    assert not ok and "already authorised" in reason
+    assert not ok and reason == "opt_authorised"
 
 
 def test_filing_window_spans_90_before_to_60_after(ruleset):

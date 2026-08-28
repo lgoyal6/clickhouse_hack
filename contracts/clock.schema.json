@@ -61,6 +61,13 @@
       ],
       "description": "Why it is not running, in the caller's locale. Required reading when applicable is false: 'not in H-1B status; the six-year meter has not started' is an answer, and zero is not."
     },
+    "not_applicable_code": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Stable slug for why the clock is not running, e.g. 'not_h1b'. The engine returns the code and the API owns the wording, so the reason can be translated. not_applicable_reason is that code rendered in the caller's locale."
+    },
     "as_of": {
       "type": "string",
       "format": "date"

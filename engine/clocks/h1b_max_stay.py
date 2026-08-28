@@ -16,7 +16,7 @@ KIND = "deadline"
 
 def applies(state, as_of: dt.date) -> tuple[bool, str]:
     if state.h1b_first_entry is None:
-        return False, "not in H-1B status; the six-year meter has not started"
+        return False, "not_h1b"
     return True, ""
 
 

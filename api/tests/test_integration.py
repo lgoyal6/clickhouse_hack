@@ -206,11 +206,58 @@ def test_daniel_ac21_is_derived_and_shows_its_arithmetic(client):
     assert "our arithmetic" in ac21["derivation"]
 
 
-def test_locale_follows_the_person(client):
-    assert next(c for c in clocks(client, "sess_maria")["clocks"]
-                if c["clock_key"] == "opt_unemployment")["label"] == "Días de desempleo"
-    assert next(c for c in clocks(client, "sess_daniel")["clocks"]
-                if c["clock_key"] == "ac21_365")["label"] == "AC21 365-day threshold"
+def test_english_is_the_default_not_the_stored_preference(client):
+    """Maria's stored locale is 'es' and the wall still opens in English.
+
+    A demo that opens in a language the room does not read is a worse failure than
+    one that asks. The stored locale is a preference captured at intake and surfaced
+    back to the user; the switcher decides what is displayed.
+    """
+    body = clocks(client, "sess_maria")
+    assert body["locale"] == "en"
+    assert body["person"]["preferred_locale"] == "es"
+    label = next(c for c in body["clocks"]
+                 if c["clock_key"] == "opt_unemployment")["label"]
+    assert label == "Unemployment days"
+
+
+@pytest.mark.parametrize("code,label,reason", [
+    ("en", "Unemployment days", "Not in H-1B status"),
+    ("es", "Días de desempleo", "No está en estatus H-1B"),
+    ("hi", "बेरोज़गारी के दिन", "H-1B स्थिति में नहीं"),
+])
+def test_all_three_languages_render(client, code, label, reason):
+    body = clocks(client, "sess_maria", locale=code)
+    assert body["locale"] == code
+    assert next(c for c in body["clocks"]
+                if c["clock_key"] == "opt_unemployment")["label"] == label
+    not_running = next(c for c in body["clocks"] if c["clock_key"] == "ac21_365")
+    assert not_running["not_applicable_code"] == "not_h1b"
+    assert reason in not_running["not_applicable_reason"]
+
+
+def test_an_unknown_locale_falls_back_to_english_not_a_key(client):
+    body = clocks(client, "sess_maria", locale="qq")
+    assert body["locale"] == "en"
+    assert next(c for c in body["clocks"]
+                if c["clock_key"] == "opt_unemployment")["label"] == "Unemployment days"
+
+
+def test_every_clock_has_all_three_languages():
+    """A missing translation must fail here, not render an English string mid-page."""
+    from api.main import LABELS, LOCALES, REASONS, UI_STRINGS
+    for name, table in (("LABELS", LABELS), ("REASONS", REASONS),
+                        ("UI_STRINGS", UI_STRINGS)):
+        for key, entry in table.items():
+            missing = [c for c in LOCALES if c not in entry]
+            assert not missing, f"{name}[{key}] missing {missing}"
+
+
+def test_the_person_is_named_not_a_cookie_value(client):
+    for session, name in (("sess_maria", "Maria O."), ("sess_daniel", "Daniel R.")):
+        body = clocks(client, session)
+        assert body["person"]["name"] == name
+        assert body["person"]["summary"]
 
 
 def test_critical_sorts_first(client):

@@ -16,7 +16,7 @@ KIND = "deadline"
 
 def applies(state, as_of: dt.date) -> tuple[bool, str]:
     if state.milestone_date("I485_FILED") is None:
-        return False, "no I-485 on file; portability has not started"
+        return False, "no_i485"
     return True, ""
 
 

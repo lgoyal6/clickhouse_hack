@@ -22,9 +22,9 @@ def _last_job_end(state) -> dt.date | None:
 
 def applies(state, as_of: dt.date) -> tuple[bool, str]:
     if state.h1b_first_entry is None:
-        return False, "not in H-1B status"
+        return False, "not_h1b"
     if _last_job_end(state) is None:
-        return False, "currently employed; the grace period has not started"
+        return False, "currently_employed"
     return True, ""
 
 
