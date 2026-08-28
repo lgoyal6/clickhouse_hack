@@ -31,7 +31,9 @@
       },
       "superseded": null,
       "change_reason": "facts_changed",
-      "engine_version": "0.1.0"
+      "engine_version": "0.1.0",
+      "applicable": true,
+      "not_applicable_reason": null
     },
     {
       "clock_key": "cap_gap_window",
@@ -68,7 +70,9 @@
         "delta_days": 183
       },
       "change_reason": "law_changed",
-      "engine_version": "0.1.0"
+      "engine_version": "0.1.0",
+      "applicable": true,
+      "not_applicable_reason": null
     },
     {
       "clock_key": "opt_filing_window",
@@ -98,6 +102,28 @@
       },
       "superseded": null,
       "change_reason": null,
+      "engine_version": "0.1.0",
+      "applicable": true,
+      "not_applicable_reason": null
+    },
+    {
+      "clock_key": "ac21_365",
+      "label": "AC21 365-day threshold",
+      "kind": "deadline",
+      "severity": "info",
+      "as_of": "2026-08-28",
+      "applicable": false,
+      "not_applicable_reason": "not in H-1B status; the six-year meter has not started",
+      "engine_version": "0.1.0"
+    },
+    {
+      "clock_key": "h1b_max_stay",
+      "label": "H-1B maximum stay",
+      "kind": "deadline",
+      "severity": "info",
+      "as_of": "2026-08-28",
+      "applicable": false,
+      "not_applicable_reason": "not in H-1B status; the six-year meter has not started",
       "engine_version": "0.1.0"
     }
   ]

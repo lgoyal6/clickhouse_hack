@@ -31,7 +31,9 @@
       },
       "superseded": null,
       "change_reason": "time_passed",
-      "engine_version": "0.1.0"
+      "engine_version": "0.1.0",
+      "applicable": true,
+      "not_applicable_reason": null
     },
     {
       "clock_key": "h1b_max_stay",
@@ -61,7 +63,9 @@
       },
       "superseded": null,
       "change_reason": "time_passed",
-      "engine_version": "0.1.0"
+      "engine_version": "0.1.0",
+      "applicable": true,
+      "not_applicable_reason": null
     },
     {
       "clock_key": "h1b_grace_period",
@@ -91,7 +95,9 @@
       },
       "superseded": null,
       "change_reason": null,
-      "engine_version": "0.1.0"
+      "engine_version": "0.1.0",
+      "applicable": true,
+      "not_applicable_reason": null
     }
   ]
 }

@@ -53,6 +53,32 @@ def main() -> int:
                 "; ".join(f"{list(e.path)} {e.message}" for e in errors),
             )
 
+    # Negative check: a RUNNING clock without provenance must be REJECTED.
+    # Without this, the conditional requirement is assumed rather than proven.
+    uncited = {
+        "clock_key": "opt_unemployment", "label": "Unemployment days",
+        "kind": "consumption", "severity": "critical", "as_of": "2026-08-28",
+        "applicable": True, "days_consumed": 131, "denominator": 150,
+    }
+    check(
+        "a running clock with no provenance is rejected (REVIEW H2)",
+        bool(list(validator.iter_errors(uncited))),
+    )
+    # And a non-applicable clock without provenance must be ACCEPTED, because a clock
+    # that has not started has no governing rule to cite.
+    not_running = {
+        "clock_key": "ac21_365", "label": "AC21 365-day threshold",
+        "kind": "deadline", "severity": "info", "as_of": "2026-08-28",
+        "applicable": False,
+        "not_applicable_reason": "not in H-1B status; the six-year meter has not started",
+    }
+    errs = list(validator.iter_errors(not_running))
+    check(
+        "a not-applicable clock needs no provenance (REVIEW B11)",
+        not errs,
+        "; ".join(e.message for e in errs),
+    )
+
     # Every fixture must at least be well-formed JSON.
     for path in sorted((HERE / "fixtures").glob("*.json")):
         try:
