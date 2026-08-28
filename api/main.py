@@ -18,6 +18,9 @@ import pathlib
 import time
 
 from fastapi import Cookie, FastAPI, HTTPException, Query, Response
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from psycopg import errors as pgerrors
 
 from engine import ENGINE_VERSION
@@ -126,6 +129,50 @@ def serialise(clock: dict, locale: str) -> dict:
 
 
 # ------------------------------------------------------------------ routes ----
+
+# The UI is served by the API on purpose.
+#
+# Same origin means the session cookie is sent on every fetch with no CORS dance and
+# no cross-site cookie rules to fight. One port, one URL, nothing to configure:
+#
+#     http://localhost:8000/ui
+#
+# CORS is still enabled for localhost so the page can also be served from a separate
+# dev server if someone prefers that.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origin_regex=r"http://(localhost|127\.0\.0\.1):\d+",
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.get("/")
+def root(sc_session: str | None = Cookie(default=None)):
+    """Entry point. Establishes a demo session if there is not one already.
+
+    Without this, opening the app cold gives a 401 and an empty wall, which looks
+    like a broken build rather than a missing sign-in.
+    """
+    if sc_session in DEMO_SESSIONS:
+        return RedirectResponse("/ui/", status_code=303)
+    return RedirectResponse("/session/sess_maria", status_code=303)
+
+
+@app.get("/session/{name}")
+def switch_session(name: str):
+    """Set the demo session cookie and return to the wall.
+
+    Persona switching is two sessions, never a user id in a query string. This is the
+    whole reason no endpoint accepts an identity parameter. See docs/REVIEW.md D1.
+    """
+    if name not in DEMO_SESSIONS:
+        raise HTTPException(404, detail=f"unknown session {name!r}")
+    r = RedirectResponse("/ui/", status_code=303)
+    r.set_cookie("sc_session", name, httponly=False, samesite="lax", path="/")
+    return r
+
 
 @app.get("/v1/clocks")
 def get_my_clocks(
@@ -533,6 +580,9 @@ def standing(sc_session: str | None = Cookie(default=None),
         },
         "disclaimer": DISCLAIMER,
     }
+
+
+app.mount("/ui", StaticFiles(directory=REPO / "web", html=True), name="ui")
 
 
 @app.get("/healthz")

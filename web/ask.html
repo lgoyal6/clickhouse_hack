@@ -21,6 +21,15 @@
   .fallback { font-family: var(--font-data); font-size: .75rem; color: var(--rule-text);
       margin: 0 0 var(--space-2); }
   .fallback a { color: var(--stamp); }
+  .ask-panel { flex: 1; display: flex; flex-direction: column; justify-content: center;
+    align-items: flex-start; gap: var(--space-3); padding: var(--space-8);
+    border: var(--hairline) solid var(--rule); }
+  .ask-panel__lead { font-family: var(--font-display); font-size: 1.125rem;
+    letter-spacing: .04em; text-transform: uppercase; margin: 0; }
+  .ask-panel__cta { font-family: var(--font-data); font-size: 1rem; color: var(--stamp);
+    border: var(--hairline) solid var(--stamp); padding: var(--space-2) var(--space-4);
+    text-decoration: none; display: inline-block; }
+  .ask-panel__cta:hover { background: var(--stamp); color: var(--paper); }
 </style>
 </head>
 <body>
@@ -45,9 +54,42 @@
      first (`make -f Makefile.chat up`) and ANTHROPIC_API_KEY / CH_READONLY_PASSWORD
      filled into librechat/.env. -->
 <section class="ask">
-  <p class="fallback">If this does not load, <a href="http://localhost:3080" target="_blank" rel="noreferrer">open Ask in a new tab</a>.</p>
-  <iframe src="http://localhost:3080" title="Ask — Status Clock assistant"></iframe>
+  <!-- LibreChat sends X-Frame-Options: SAMEORIGIN. This page is served from :8000 and
+       LibreChat from :3080, so the browser refuses to frame it and renders a
+       "refused to connect" box. Rather than showing that, the iframe is attempted and
+       swapped for a real panel if it fails, which it will until the two are behind one
+       origin. Two tabs is a fine answer for a laptop demo. -->
+  <div class="ask-panel" id="panel" hidden>
+    <p class="ask-panel__lead">Ask runs as a full surface, not a corner bubble.</p>
+    <p><a class="ask-panel__cta" href="http://localhost:3080" target="_blank" rel="noreferrer">Open Ask →</a></p>
+    <p class="fallback">
+      It opens in its own tab because LibreChat sends <code>X-Frame-Options: SAMEORIGIN</code>
+      and refuses to be embedded from a different port.
+    </p>
+  </div>
+  <iframe id="frame" src="http://localhost:3080" title="Ask — Status Clock assistant"></iframe>
 </section>
 
+<script>
+// The load event fires even when the browser blocks the frame, so probe the document
+// instead: a blocked frame has no reachable contentDocument and no origin we can see.
+const frame = document.getElementById('frame');
+const panel = document.getElementById('panel');
+function fallback() { frame.hidden = true; panel.hidden = false; }
+frame.addEventListener('error', fallback);
+setTimeout(() => {
+  try {
+    if (!frame.contentWindow || frame.contentWindow.length === undefined) fallback();
+    else if (!frame.contentDocument && !frame.contentWindow.origin) fallback();
+  } catch (e) { /* cross-origin means it DID load */ }
+  // Chrome renders its own error page in-frame for X-Frame-Options, which is
+  // same-origin-ish and readable. If we can read it, it is not LibreChat.
+  try {
+    const t = frame.contentDocument && frame.contentDocument.body
+      && frame.contentDocument.body.innerText || '';
+    if (/refused to connect|blocked|ERR_/i.test(t)) fallback();
+  } catch (e) {}
+}, 1500);
+</script>
 </body>
 </html>

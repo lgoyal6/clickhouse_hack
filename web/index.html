@@ -76,19 +76,29 @@
 <script type="module">
 // Reads the contract fixtures directly. When Person A's API is up, change BASE to
 // http://localhost:8000 and drop the fixture map. Nothing else changes.
-const BASE = null;   // null = fixtures
+// Served by the API at /ui, so this is same-origin and the session cookie rides
+// along automatically. Set LIVE = false to fall back to the contract fixtures, which
+// is how this page worked before the API existed and still works with no backend.
+const LIVE = true;
 const FIXTURES = {
   sess_maria:  '../contracts/fixtures/clocks_maria_stem_opt.json',
   sess_daniel: '../contracts/fixtures/clocks_daniel_h1b.json',
 };
+
+function currentSession() {
+  const m = document.cookie.match(/(?:^|;\s*)sc_session=([^;]+)/);
+  return m ? m[1] : 'sess_maria';
+}
 
 const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const fmtDate = iso => new Date(iso + 'T00:00:00')
   .toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 
 async function load(session) {
-  if (BASE) {
-    const r = await fetch(`${BASE}/v1/clocks`, { credentials: 'include' });
+  if (LIVE) {
+    // No user id in the URL. The API reads the session cookie and nothing else.
+    const r = await fetch(`/v1/clocks?as_of=2026-08-28`, { credentials: 'same-origin' });
+    if (!r.ok) throw new Error(`API ${r.status}`);
     return r.json();
   }
   return (await fetch(FIXTURES[session])).json();
@@ -285,13 +295,33 @@ async function render(session) {
 
 for (const btn of document.querySelectorAll('.persona button')) {
   btn.addEventListener('click', () => {
+    if (LIVE) {
+      // Switch the SESSION, not a parameter. The server sets the cookie and sends
+      // us back here, which is exactly how a real sign-in would behave.
+      window.location = `/session/${btn.dataset.session}`;
+      return;
+    }
     for (const b of document.querySelectorAll('.persona button'))
       b.setAttribute('aria-pressed', String(b === btn));
     render(btn.dataset.session);
   });
 }
 
-render('sess_maria');
+const active = currentSession();
+for (const b of document.querySelectorAll('.persona button'))
+  b.setAttribute('aria-pressed', String(b.dataset.session === active));
+
+render(active).catch(err => {
+  const signedOut = /401/.test(err.message);
+  document.getElementById('wall').innerHTML = signedOut
+    ? `<p style="font-family:var(--font-data)">
+         No session. <a href="/session/sess_maria">Sign in as Maria</a> or
+         <a href="/session/sess_daniel">as Daniel</a>.</p>`
+    : `<p style="font-family:var(--font-data);color:var(--urgent)">
+         Cannot reach the API (${err.message}). Start it with
+         <code>make -f Makefile.data api</code>, or set LIVE = false in this file to
+         render from the contract fixtures instead.</p>`;
+});
 </script>
 </body>
 </html>

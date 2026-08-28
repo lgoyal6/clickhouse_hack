@@ -6,13 +6,31 @@
 
 services:
   librechat:
-    image: ghcr.io/danny-avila/librechat-dev:latest
+    # Built rather than pulled: the upstream Alpine image has no C compiler, and the
+    # ClickHouse MCP needs to build lz4 from source on musl/aarch64. See the Dockerfile.
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: status-clock/librechat:local
     ports: ["3080:3080"]
     environment:
       HOST: 0.0.0.0
       MONGO_URI: mongodb://mongodb:27017/LibreChat
       MEILI_HOST: http://meilisearch:7700
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      # LibreChat refuses to boot without these. They are its own encryption and
+      # session secrets, generated locally by make -f Makefile.chat env; nothing is
+      # signed up for and no external service is involved.
+      CREDS_KEY: ${CREDS_KEY}
+      CREDS_IV: ${CREDS_IV}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      ALLOW_REGISTRATION: ${ALLOW_REGISTRATION:-true}
+      ALLOW_EMAIL_LOGIN: ${ALLOW_EMAIL_LOGIN:-true}
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-devonly}
+      # One container, one scheduler. Without this LibreChat refuses schedule writes
+      # because it cannot prove it is the only replica.
+      SCHEDULES_SINGLE_PROCESS: "true"
       # Person A hands you this. Read-only ClickHouse user.
       CH_READONLY_PASSWORD: ${CH_READONLY_PASSWORD}
       STATUS_CLOCK_API: http://host.docker.internal:8000
@@ -20,6 +38,7 @@ services:
     volumes:
       - ./librechat.yaml:/app/librechat.yaml:ro
       - ../agents:/app/agents:ro
+      - ../contracts:/app/contracts:ro
       - ./uploads:/app/client/public/images
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -35,4 +54,7 @@ services:
     environment:
       MEILI_NO_ANALYTICS: "true"
       MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-devonly}
+      # One container, one scheduler. Without this LibreChat refuses schedule writes
+      # because it cannot prove it is the only replica.
+      SCHEDULES_SINGLE_PROCESS: "true"
     volumes: ["./meili-data:/meili_data"]

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 import urllib.error
 import urllib.parse
@@ -24,7 +25,7 @@ class ClickHouseError(RuntimeError):
 
 
 def query(sql: str, params: dict | None = None, timeout: int = 30,
-          body: str | None = None) -> tuple[list[dict], float]:
+          body: str | None = None, query_id: str | None = None) -> tuple[list[dict], float]:
     """Run a SELECT and return (rows, elapsed_ms).
 
     Parameters go through ClickHouse's own {name:Type} substitution rather than
@@ -32,11 +33,24 @@ def query(sql: str, params: dict | None = None, timeout: int = 30,
     """
     # An INSERT ... FORMAT TabSeparated carries its rows in the request body and must
     # NOT have FORMAT JSON appended.
-    if body is not None:
-        args = {"query": sql}
+    stmt = sql.rstrip().rstrip(";")
+    # Strip leading /* */ comments and blank lines before deciding, or a tagged query
+    # like "/* bench_x */ SELECT ..." is misread as a non-SELECT and comes back as raw
+    # TSV that will not parse as JSON.
+    probe = re.sub(r"^\s*(/\*.*?\*/\s*)*", "", stmt, flags=re.S).lstrip().upper()
+    returns_rows = probe.startswith(("SELECT", "WITH", "SHOW", "DESCRIBE", "EXPLAIN"))
+    if body is not None or not returns_rows:
+        # INSERT ... FORMAT TabSeparated carries rows in the body, and statements like
+        # SYSTEM FLUSH LOGS return nothing. Appending FORMAT JSON to either is a
+        # syntax error.
+        args = {"query": stmt}
     else:
-        args = {"query": sql.rstrip().rstrip(";") + " FORMAT JSON",
-                "default_format": "JSON"}
+        args = {"query": stmt + " FORMAT JSON", "default_format": "JSON"}
+    if query_id:
+        # The only reliable way to correlate a query with its system.query_log row.
+        # ClickHouse strips leading /* */ comments from the logged query text, so
+        # tagging the SQL does not survive.
+        args["query_id"] = query_id
     for key, value in (params or {}).items():
         args[f"param_{key}"] = str(value)
 
