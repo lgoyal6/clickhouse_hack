@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Status Clock</title>
+<link rel="stylesheet" href="src/styles/tokens.css">
+<link rel="stylesheet" href="src/components/FieldCard.css">
+<style>
+  header { border-bottom: var(--hairline) solid var(--rule); padding: var(--space-4); max-width: 68rem; }
+  h1 { font-family: var(--font-display); font-size: 1.125rem; letter-spacing: .08em;
+       text-transform: uppercase; margin: 0 0 var(--space-2); }
+  .meta { font-family: var(--font-data); font-variant-numeric: var(--figures);
+          font-size: .75rem; color: var(--rule-text); }
+  .persona { padding: var(--space-4) var(--space-4) 0; max-width: 68rem; }
+  .persona button { font: inherit; font-family: var(--font-data); font-size: .75rem;
+      background: none; border: var(--hairline) solid var(--rule); color: var(--ink);
+      padding: var(--space-1) var(--space-3); cursor: pointer; }
+  .persona button[aria-pressed="true"] { border-color: var(--stamp); color: var(--stamp); }
+  .notrunning { max-width: 68rem; padding: 0 var(--space-4) var(--space-8); }
+  .notrunning h2 { font-family: var(--font-display); font-size: .6875rem;
+      letter-spacing: .08em; text-transform: uppercase; color: var(--rule-text);
+      border-top: var(--hairline) solid var(--rule); padding-top: var(--space-3); }
+  .notrunning li { font-family: var(--font-data); font-size: .75rem; color: var(--rule-text);
+      list-style: none; margin-bottom: var(--space-1); }
+  footer { max-width: 68rem; padding: var(--space-4); font-size: .75rem; color: var(--rule-text); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Status Clock</h1>
+  <p class="meta" id="asof"></p>
+</header>
+
+<!-- Persona switching is two sessions, not two user ids. The API has no route that
+     accepts a user id; see contracts/openapi.yaml and docs/REVIEW.md D1. -->
+<nav class="persona" aria-label="Demo session">
+  <button data-session="sess_maria" aria-pressed="true">sess_maria</button>
+  <button data-session="sess_daniel" aria-pressed="false">sess_daniel</button>
+</nav>
+
+<main class="clock-wall" id="wall"></main>
+
+<section class="notrunning" id="notrunning" hidden>
+  <h2>Not running yet</h2>
+  <ul id="notrunning-list"></ul>
+</section>
+
+<footer>This is information, not legal advice.</footer>
+
+<script type="module">
+// Reads the contract fixtures directly. When Person A's API is up, change BASE to
+// http://localhost:8000 and drop the fixture map. Nothing else changes.
+const BASE = null;   // null = fixtures
+const FIXTURES = {
+  sess_maria:  '../contracts/fixtures/clocks_maria_stem_opt.json',
+  sess_daniel: '../contracts/fixtures/clocks_daniel_h1b.json',
+};
+
+const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const fmtDate = iso => new Date(iso + 'T00:00:00')
+  .toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+
+async function load(session) {
+  if (BASE) {
+    const r = await fetch(`${BASE}/v1/clocks`, { credentials: 'include' });
+    return r.json();
+  }
+  return (await fetch(FIXTURES[session])).json();
+}
+
+function headline(c) {
+  if (c.kind === 'consumption') return `${c.days_consumed} / ${c.denominator}`;
+  if (c.kind === 'window')      return fmtDate(c.window_end).toUpperCase();
+  return `${c.days_remaining}`;
+}
+
+function subline(c) {
+  // Three numbers, three labels. 216 is days remaining; the window is 243 days
+  // long; 183 of those are the gain from the rule change. The spec's mock labels
+  // days-remaining as "days of work authorization". See docs/REVIEW.md F3.
+  if (c.kind === 'consumption') return `${c.days_remaining} days remaining`;
+  if (c.kind === 'window') {
+    const parts = [`${c.days_remaining} days remaining`];
+    if (c.window_days) parts.push(`${c.window_days}-day window`);
+    if (c.superseded?.delta_days) parts.push(`${c.superseded.delta_days} days gained`);
+    return parts.join(' · ');
+  }
+  return `by ${fmtDate(c.window_end)}`;
+}
+
+function card(c) {
+  const el = document.createElement('article');
+  el.className = `field-card field-card--${c.severity}`;
+
+  // The accessible name carries the final value and the citation from the start, so
+  // assistive tech never reads an intermediate number off the tick animation.
+  // See docs/REVIEW.md F4.
+  el.setAttribute('role', 'group');
+  el.setAttribute('aria-label',
+    `${c.label}. ${headline(c)}. ${subline(c)}. ` +
+    `Governed by ${c.provenance.citation}, ${c.provenance.authority}, ` +
+    `effective ${c.provenance.effective_from}.` +
+    (c.provenance.verified ? '' : ' This rule is unverified.'));
+
+  const eyebrow = document.createElement('p');
+  eyebrow.className = 'field-card__eyebrow';
+  eyebrow.textContent = c.label;
+  el.append(eyebrow);
+
+  if (c.superseded) {
+    const prior = document.createElement('p');
+    prior.className = 'field-card__prior';
+    prior.setAttribute('aria-hidden', 'true');
+    prior.textContent = c.superseded.prior_value;
+    el.append(prior);
+  }
+
+  const count = document.createElement('p');
+  count.className = `field-card__count field-card__count--${c.severity}`;
+  count.setAttribute('aria-hidden', 'true');
+  count.textContent = headline(c);
+  el.append(count);
+
+  const sub = document.createElement('p');
+  sub.className = 'field-card__denominator';
+  sub.setAttribute('aria-hidden', 'true');
+  sub.textContent = subline(c);
+  el.append(sub);
+
+  if (c.derived && c.derivation) {
+    const d = document.createElement('p');
+    d.className = 'field-card__derived';
+    d.textContent = c.derivation;
+    el.append(d);
+  }
+
+  el.append(Object.assign(document.createElement('hr'), { className: 'field-card__divider' }));
+
+  const prov = document.createElement('p');
+  prov.className = 'field-card__provenance';
+  const link = document.createElement('a');
+  link.href = c.provenance.source_url;
+  link.textContent = c.provenance.citation;
+  link.rel = 'noreferrer';
+  prov.append(link);
+  prov.append(Object.assign(document.createElement('span'),
+    { textContent: `· eff. ${c.provenance.effective_from}` }));
+  if (c.superseded) {
+    prov.append(Object.assign(document.createElement('span'),
+      { textContent: `· supersedes rule of ${c.superseded.effective_from}` }));
+  }
+  el.append(prov);
+
+  // Unverified rules always show the band. Never suppress this.
+  if (!c.provenance.verified) {
+    el.append(Object.assign(document.createElement('p'), {
+      className: 'field-card__unverified',
+      textContent: 'Unverified against the primary source.',
+    }));
+  }
+  return el;
+}
+
+function tick(el, target) {
+  if (reduced) return;
+  const digits = String(target).match(/\d+/);
+  if (!digits) return;
+  const end = Number(digits[0]);
+  const start = performance.now();
+  const dur = 400;
+  const frame = now => {
+    const t = Math.min(1, (now - start) / dur);
+    el.textContent = String(target).replace(/\d+/, String(Math.round(end * t)));
+    if (t < 1) requestAnimationFrame(frame);
+    else el.textContent = String(target);
+  };
+  requestAnimationFrame(frame);
+}
+
+async function render(session) {
+  const data = await load(session);
+  const running = data.clocks.filter(c => c.applicable !== false);
+  const notRunning = data.clocks.filter(c => c.applicable === false);
+
+  document.getElementById('asof').textContent =
+    `As of ${fmtDate(data.as_of)} · ${running.length} clocks · ` +
+    `${data.needs_attention} needs attention`;
+
+  const wall = document.getElementById('wall');
+  wall.replaceChildren();
+  for (const c of running) {
+    const el = card(c);
+    wall.append(el);
+    tick(el.querySelector('.field-card__count'), headline(c));
+  }
+
+  // Clocks that are not applicable get a quiet secondary row with the reason,
+  // rather than being drawn as if they were running. See docs/REVIEW.md B11.
+  const section = document.getElementById('notrunning');
+  const list = document.getElementById('notrunning-list');
+  list.replaceChildren();
+  section.hidden = notRunning.length === 0;
+  for (const c of notRunning) {
+    list.append(Object.assign(document.createElement('li'),
+      { textContent: `${c.clock_key} — ${c.not_applicable_reason}` }));
+  }
+}
+
+for (const btn of document.querySelectorAll('.persona button')) {
+  btn.addEventListener('click', () => {
+    for (const b of document.querySelectorAll('.persona button'))
+      b.setAttribute('aria-pressed', String(b === btn));
+    render(btn.dataset.session);
+  });
+}
+
+render('sess_maria');
+</script>
+</body>
+</html>
