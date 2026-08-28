@@ -97,27 +97,8 @@ CREATE TABLE lca_filings (
 ) ENGINE = MergeTree
 ORDER BY (soc_code_norm, worksite_state, fiscal_year);
 
-CREATE TABLE IF NOT EXISTS perm_filings (
-  case_number      String,
-  case_status      LowCardinality(String),
-  case_status_norm LowCardinality(String) MATERIALIZED upperUTF8(trim(BOTH ' ' FROM case_status)),
-  received_date    Date,
-  decision_date    Nullable(Date),
-  employer_name    String,
-  employer_fein    Nullable(String),
-  soc_code         LowCardinality(String),
-  worksite_state   LowCardinality(String),
-  wage_offer       Nullable(Decimal(14,2)),
-  country_of_citizenship LowCardinality(String),
-  class_of_admission LowCardinality(String),
-  fiscal_year      UInt16,
-  source_file      LowCardinality(String),
-  -- Nullable Int32, not UInt16. A pending case has no decision date, and the spec's
-  -- column stores 45,447 for such a row. Verified. See REVIEW A7.
-  days_to_decision Nullable(Int32) MATERIALIZED
-    if(decision_date IS NULL, NULL, dateDiff('day', received_date, decision_date))
-) ENGINE = MergeTree
-ORDER BY (soc_code, received_date);
+-- perm_filings now lives in 015_perm.sql: the real file has 137 columns and a
+-- naming convention with nothing in common with LCA. See that file.
 
 CREATE TABLE IF NOT EXISTS visa_bulletin (
   bulletin_month    Date,
