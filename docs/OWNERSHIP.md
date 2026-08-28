@@ -11,9 +11,14 @@ and neither person is ever blocked waiting for the other's code to exist.
 
 | Branch | Owner | Owns these paths, and only these |
 |---|---|---|
-| `track/data` | Person A | `db/`, `clickhouse/`, `engine/`, `ingest/`, `api/`, `infra/data.compose.yml`, `Makefile.data` |
-| `track/interface` | Person B | `web/`, `librechat/`, `agents/`, `infra/chat.compose.yml`, `Makefile.chat` |
+| `track/data` | Person A | `db/`, `clickhouse/`, `engine/`, `ingest/`, `api/`, `infra/`, `Makefile.data`, `TRACK_DATA.md` |
+| `track/interface` | Person B | `web/`, `librechat/`, `agents/`, `Makefile.chat`, `TRACK_INTERFACE.md` |
 | `main` | both, by agreement | `docs/`, `contracts/`, `README.md`, `.gitignore` |
+
+Note the filenames. There is no shared `TRACK.md` and no shared `Makefile`, and the
+two compose files live in separate trees (`infra/data.compose.yml` and
+`librechat/chat.compose.yml`). Every path in the table above appears on exactly one
+branch, which is what makes the merge trivial rather than merely likely to work.
 
 Nothing on `main` is edited during normal work. If a contract has to change, that is
 a deliberate commit on `main` touching only `contracts/`, made after both people
