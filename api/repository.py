@@ -199,3 +199,97 @@ def current_employment(conn) -> dict | None:
             """
         )
         return cur.fetchone()
+
+
+# Columns a caller may set, per fact kind. An allow-list rather than passing the
+# payload through: the request comes from a language model reading a document, and
+# "whatever keys it produced" is not a schema.
+WRITABLE = {
+    "status_period": ("status_type", "layer", "start_date", "end_date", "ead_start",
+                      "ead_expiry", "program_end", "is_stem", "i94_expiry"),
+    "employment_episode": ("employer_name", "start_date", "end_date", "hours_per_week",
+                           "soc_code", "worksite_state", "offered_wage", "wage_unit",
+                           "employment_kind", "counts_as_employment"),
+    "gc_milestone": ("milestone", "event_date", "priority_date", "category",
+                     "receipt_number"),
+}
+
+HAS_CONFIDENCE = {"status_period"}
+
+TABLES = {
+    "status_period": "status_periods",
+    "employment_episode": "employment_episodes",
+    "gc_milestone": "gc_milestones",
+}
+
+RETURNING = {
+    "status_period": "id::text, status_type, layer, start_date, end_date, confidence",
+    "employment_episode": "id::text, employer_name, start_date, end_date, hours_per_week",
+    "gc_milestone": "id::text, milestone, event_date, category",
+}
+
+
+def write_fact(conn, subject_id: str, kind: str, payload: dict,
+               confidence: str = "inferred") -> dict:
+    """Insert one extracted fact and read it straight back.
+
+    Reads back rather than echoing the request, so what the user confirms is what the
+    database actually holds, including anything a default or a trigger changed.
+    """
+    cols = WRITABLE[kind]
+    values = {k: payload[k] for k in cols if k in payload and payload[k] is not None}
+    values["user_id"] = subject_id
+    # Only status_periods carries a confidence column. employment_episodes and
+    # gc_milestones do not, and adding it blindly raises UndefinedColumn.
+    if kind in HAS_CONFIDENCE:
+        values["confidence"] = confidence
+
+    names = ", ".join(values)
+    marks = ", ".join(["%s"] * len(values))
+    with conn.cursor() as cur:
+        cur.execute(
+            f"INSERT INTO {TABLES[kind]} ({names}) VALUES ({marks}) "
+            f"RETURNING {RETURNING[kind]}",
+            list(values.values()),
+        )
+        return cur.fetchone()
+
+
+def rule_versions(conn, rule_key: str | None = None) -> list[dict]:
+    """Every version of every rule, newest first. Backs claim checking."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT id::text AS rule_id, rule_key, effective_from, effective_to,
+                   params, citation, authority, source_url,
+                   supersedes::text AS supersedes, note, verified_by, verified_at
+            FROM rules
+            -- Cast both: Postgres cannot infer the type of a bare NULL parameter
+            -- and raises IndeterminateDatatype on $1.
+            WHERE %s::text IS NULL OR rule_key = %s::text
+            ORDER BY rule_key, effective_from DESC
+            """,
+            (rule_key, rule_key),
+        )
+        return cur.fetchall()
+
+
+def end_employment(conn, end_date, employer_name: str | None = None) -> dict | None:
+    """Close the open employment episode. "I was laid off on 1 August."
+
+    This is an UPDATE, not an INSERT, and the distinction matters. Recording a layoff
+    as a new closed episode leaves the original open one in place, so the person still
+    reads as employed and the grace period never starts. Status history is corrected,
+    not appended to; that is the argument for Postgres in the first place.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE employment_episodes SET end_date = %s
+            WHERE end_date IS NULL
+              AND (%s::text IS NULL OR employer_name ILIKE %s::text)
+            RETURNING id::text, employer_name, start_date, end_date
+            """,
+            (end_date, employer_name, employer_name),
+        )
+        return cur.fetchone()

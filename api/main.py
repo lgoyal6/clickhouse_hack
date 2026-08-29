@@ -15,6 +15,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import pathlib
+import re
 import time
 
 from fastapi import Cookie, FastAPI, HTTPException, Query, Response
@@ -438,58 +439,74 @@ def replay(body: dict, sc_session: str | None = Cookie(default=None)):
 
 @app.post("/v1/facts", status_code=201)
 def record_fact(body: dict, response: Response, sc_session: str | None = Cookie(default=None)):
+    """Write one extracted fact and read it straight back for confirmation.
+
+    This is the write half of the product. Someone says "I was laid off on 1 August",
+    or uploads an I-20 and the agent reads a date off it, and the clocks move. Reading
+    the row back rather than echoing the request means the user confirms what the
+    database actually holds, not what was asked for.
+    """
     subject_id = subject(sc_session)
     kind = body.get("kind")
+    payload_early = body.get("payload") or {}
+
+    # "My job ended on 1 August" corrects an existing record; it does not add one.
+    # Inserting a second, closed episode would leave the original open one in place,
+    # the person would still read as employed, and the grace period would never
+    # start. Correcting history rather than appending to it is the whole reason the
+    # system of record is Postgres.
+    if kind == "employment_end":
+        if not payload_early.get("end_date"):
+            raise HTTPException(422, detail="end_date is required")
+        with repo.subject_tx(subject_id) as conn:
+            row = repo.end_employment(conn, payload_early["end_date"],
+                                      payload_early.get("employer_name"))
+        if row is None:
+            raise HTTPException(
+                404, detail="No open employment to end. Add the job first.")
+        return {
+            "id": row["id"], "kind": kind,
+            "written": {k: _iso(v) for k, v in row.items()},
+            "needs_confirmation": True,
+            "next": "Call get_my_clocks again; the countdowns have been recomputed.",
+        }
+
+    if kind not in repo.WRITABLE:
+        raise HTTPException(
+            422, detail=f"kind must be employment_end or one of {sorted(repo.WRITABLE)}")
+
     payload = body.get("payload") or {}
-    if kind != "status_period":
-        raise HTTPException(422, detail=f"kind {kind!r} is not wired yet")
+    confidence = body.get("confidence", "inferred")
+    if confidence not in ("document_verified", "user_stated", "inferred"):
+        raise HTTPException(422, detail=f"unknown confidence {confidence!r}")
 
-    cols = ("status_type", "layer", "start_date", "end_date", "ead_start",
-            "ead_expiry", "program_end", "is_stem")
-    values = {k: payload.get(k) for k in cols if k in payload}
-    values.setdefault("layer", "primary")
-    values["user_id"] = subject_id
-    values["confidence"] = body.get("confidence", "inferred")
-
-    names = ", ".join(values)
-    marks = ", ".join(["%s"] * len(values))
     try:
-        with repo.subject_tx(subject_id) as conn, conn.cursor() as cur:
-            cur.execute(
-                f"INSERT INTO status_periods ({names}) VALUES ({marks}) "
-                f"RETURNING id::text, status_type, layer, start_date, end_date, confidence",
-                list(values.values()),
-            )
-            written = cur.fetchone()
+        with repo.subject_tx(subject_id) as conn:
+            written = repo.write_fact(conn, subject_id, kind, payload, confidence)
     except pgerrors.ExclusionViolation as exc:
-        # User-facing copy, per the spec's copy rules: what went wrong and what to do.
+        # User-facing copy: what went wrong and what to do about it.
         response.status_code = 409
         return {
             "error": "overlapping_status",
-            "message": ("These dates overlap an existing status period. Adjust one of "
-                        "them, or record this as a stacked authorization "
+            "message": ("These dates overlap a status period you already have. Adjust "
+                        "one of them, or record this as a stacked authorization "
                         "(layer 'authorization') if it is a cap-gap or grace period."),
-            "conflicting_id": None,
             "detail": str(exc.diag.message_detail or "")[:300],
         }
-    except (pgerrors.CheckViolation, pgerrors.InvalidTextRepresentation) as exc:
+    except pgerrors.UniqueViolation:
+        response.status_code = 409
+        return {"error": "duplicate", "message": "You already have that on file."}
+    except (pgerrors.CheckViolation, pgerrors.InvalidTextRepresentation,
+            pgerrors.InvalidDatetimeFormat, pgerrors.NotNullViolation) as exc:
         raise HTTPException(422, detail=str(exc).split("\n")[0]) from None
 
     return {
-        "id": written["id"], "kind": kind,
+        "id": written["id"],
+        "kind": kind,
         "written": {k: _iso(v) for k, v in written.items()},
-        "needs_confirmation": written["confidence"] != "document_verified",
+        "needs_confirmation": confidence != "document_verified",
+        "next": "Call get_my_clocks again; the countdowns have been recomputed.",
     }
-
-
-@app.post("/v1/claims/check")
-def check_claim(body: dict):
-    if not body.get("text"):
-        raise HTTPException(422, detail="text is required")
-    # TODO: exact/alias match first, vector search for the tail (REVIEW C5).
-    payload = json.loads((FIXTURES / "claim_check_capgap.json").read_text())
-    payload["_warning"] = "Claim matching is not implemented. This is a fixture."
-    return payload
 
 
 CORPUS_COVERAGE = "DOL OFLC LCA disclosure, FY2024 and FY2025 (all quarters), CERTIFIED only"
@@ -567,6 +584,122 @@ def perm_context(locale: str = DEFAULT_LOCALE) -> dict | None:
                    "retrieved_at": "2026-08-28"},
         "note": (PERM_NOTE.get(locale) or PERM_NOTE["en"]).format(
             median=median, p90=p90, n=f"{n:,}"),
+    }
+
+
+# Words that point at a rule. Deliberately a small hand-written map rather than an
+# embedding lookup: the vocabulary here is tiny and fixed, and a wrong match sends
+# someone a confident answer about the wrong rule. See docs/REVIEW.md C5 for the
+# vector-search version and why exact matching comes first.
+CLAIM_KEYWORDS = {
+    "cap_gap_end": ("cap-gap", "cap gap", "capgap", "september 30", "sept 30",
+                    "april 1", "work authorization ends"),
+    "opt_unemployment_max": ("unemployment", "unemployed", "90 days", "150 days",
+                             "120 days", "out of work"),
+    "stem_opt_unemployment_add": ("stem", "24-month", "extension"),
+    "h1b_grace_period": ("grace period", "60 days", "60-day", "laid off", "layoff"),
+    "ac21_extension_threshold": ("ac21", "365", "seventh year", "beyond six"),
+    "i485_portability": ("portability", "180 days", "same or similar", "change jobs"),
+    "h1b_max_stay": ("six year", "six-year", "6 year", "maximum stay"),
+    "opt_filing_window": ("filing window", "90 days before", "60 days after"),
+    "opt_min_hours": ("20 hours", "part time", "part-time"),
+    "lottery_selection": ("lottery", "selection", "wage-weighted", "random"),
+}
+
+
+def _claim_matches(text: str, params: dict) -> bool:
+    """Does the claim assert the value this rule version carries?"""
+    low = text.lower()
+    for value in params.values():
+        v = str(value).lower()
+        if v in low:
+            return True
+        if v == "sept_30" and ("september 30" in low or "sept 30" in low or "sep 30" in low):
+            return True
+        if v == "april_1" and ("april 1" in low or "apr 1" in low):
+            return True
+        if v.isdigit() and re.search(rf"\b{v}\b", low):
+            return True
+    return False
+
+
+@app.post("/v1/claims/check")
+def check_claim(body: dict, sc_session: str | None = Cookie(default=None),
+                sc_lang: str | None = Cookie(default=None)):
+    """Check something someone was told against the rule version table.
+
+    The useful answer is almost never true or false. It is "that was true until this
+    date". Matching is keyword plus value comparison, and it says `no_match` rather
+    than reaching for the nearest rule, because a confident answer about the wrong
+    rule is worse than no answer.
+    """
+    text = (body.get("text") or "").strip()
+    if not text:
+        raise HTTPException(422, detail="text is required")
+
+    hint = body.get("rule_key")
+    low = text.lower()
+    candidates = [hint] if hint else [
+        key for key, words in CLAIM_KEYWORDS.items() if any(w in low for w in words)
+    ]
+
+    with repo.reference_tx() as conn:
+        versions = repo.rule_versions(conn)
+
+    def shape(r):
+        return {
+            "rule_id": r["rule_id"], "rule_key": r["rule_key"],
+            "effective_from": _iso(r["effective_from"]),
+            "effective_to": _iso(r["effective_to"]),
+            "params": r["params"], "citation": r["citation"],
+            "authority": r["authority"], "source_url": r["source_url"],
+            "verified": r["verified_by"] is not None,
+            "verified_by": r["verified_by"], "note": r["note"],
+        }
+
+    if not candidates:
+        return {"verdict": "no_match", "matched_version": None,
+                "governing_version": None, "superseded_on": None,
+                "match_confidence": 0.0,
+                "message": ("I cannot place that against any rule I hold. Tell me which "
+                            "deadline you mean and I will show you its version history.")}
+
+    today = dt.date.today()
+    for key in candidates:
+        vs = [v for v in versions if v["rule_key"] == key]
+        if not vs:
+            continue
+        governing = next(
+            (v for v in vs if v["effective_from"] <= today
+             and (v["effective_to"] is None or v["effective_to"] > today)), vs[0])
+        matched = next((v for v in vs if _claim_matches(text, v["params"])), None)
+        if matched is None:
+            continue
+        if matched["rule_id"] == governing["rule_id"]:
+            verdict, superseded_on = "current", None
+        else:
+            verdict = "superseded"
+            superseded_on = _iso(matched["effective_to"] or governing["effective_from"])
+        return {
+            "verdict": verdict,
+            "matched_version": shape(matched),
+            "governing_version": shape(governing),
+            "superseded_on": superseded_on,
+            "match_confidence": 0.9 if hint else 0.75,
+        }
+
+    key = candidates[0]
+    vs = [v for v in versions if v["rule_key"] == key]
+    governing = vs[0] if vs else None
+    return {
+        "verdict": "no_match" if governing is None else "never_correct",
+        "matched_version": None,
+        "governing_version": shape(governing) if governing else None,
+        "superseded_on": None,
+        "match_confidence": 0.4,
+        "message": ("That does not match any version of this rule I hold, including "
+                    "superseded ones. Check the wording, or it may never have been "
+                    "correct."),
     }
 
 

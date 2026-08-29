@@ -221,7 +221,9 @@ TOOLS = [
         "name": "record_fact",
         "description": (
             "Write an extracted date and get it back for confirmation. Always show the "
-            "user what was written. Never call this with a date they have not confirmed."
+            "user what was written. Never call this with a date they have not "
+            "confirmed. After a successful write, call get_my_clocks again: the "
+            "countdowns are recomputed and the answer has changed."
         ),
         "inputSchema": {
             "type": "object",
@@ -229,7 +231,14 @@ TOOLS = [
             "properties": {
                 "kind": {
                     "type": "string",
-                    "enum": ["status_period", "employment_episode", "gc_milestone", "document"],
+                    "enum": ["employment_end", "status_period", "employment_episode",
+                             "gc_milestone", "document"],
+                    "description": (
+                        "Use employment_end when a job ENDED: it closes the open "
+                        "episode rather than adding a second one. Adding a closed "
+                        "episode leaves the original open, the person still reads as "
+                        "employed, and the grace period never starts."
+                    ),
                 },
                 "payload": {"type": "object"},
                 "confidence": {

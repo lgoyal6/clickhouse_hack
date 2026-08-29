@@ -381,3 +381,92 @@ def test_rule_chain_walks_to_the_oldest_version(client):
 
 def test_unknown_rule_is_404(client):
     assert client.get("/v1/rules/not_a_rule").status_code == 404
+
+
+# ------------------------------------------------- the interactive path -------
+
+def _reset_daniel():
+    with repo.subject_tx(DANIEL) as conn, conn.cursor() as cur:
+        cur.execute("UPDATE employment_episodes SET end_date = NULL WHERE user_id = %s",
+                    (DANIEL,))
+
+
+def test_ending_a_job_starts_the_grace_clock(client):
+    """The interactive beat: one sentence changes a number.
+
+    A judge says "I was laid off on 1 August", and a clock that was not running
+    starts. This is the difference between a page and an engine.
+    """
+    _reset_daniel()
+    before = {c["clock_key"]: c for c in clocks(client, "sess_daniel")["clocks"]}
+    assert before["h1b_grace_period"]["applicable"] is False
+    assert before["h1b_grace_period"]["not_applicable_code"] == "currently_employed"
+
+    r = client.post("/v1/facts", cookies={"sc_session": "sess_daniel"},
+                    json={"kind": "employment_end", "confidence": "user_stated",
+                          "payload": {"end_date": "2026-08-01"}})
+    assert r.status_code == 201, r.text
+    assert r.json()["written"]["end_date"] == "2026-08-01"
+
+    after = {c["clock_key"]: c for c in clocks(client, "sess_daniel")["clocks"]}
+    grace = after["h1b_grace_period"]
+    assert grace["applicable"] is True
+    assert grace["days_remaining"] == 33          # 2026-08-01 + 60, from 2026-08-28
+    assert grace["provenance"]["citation"] == "8 CFR 214.1(l)(2)"
+    _reset_daniel()
+
+
+def test_ending_a_job_corrects_rather_than_appends(client):
+    """Recording a layoff must UPDATE the open episode, not insert a closed one.
+
+    Inserting leaves the original open, the person still reads as employed, and the
+    grace period never starts. Status history is corrected, not appended to.
+    """
+    _reset_daniel()
+    with repo.subject_tx(DANIEL) as conn, conn.cursor() as cur:
+        cur.execute("SELECT count(*) AS n FROM employment_episodes")
+        before = cur.fetchone()["n"]
+
+    client.post("/v1/facts", cookies={"sc_session": "sess_daniel"},
+                json={"kind": "employment_end", "payload": {"end_date": "2026-08-01"}})
+
+    with repo.subject_tx(DANIEL) as conn, conn.cursor() as cur:
+        cur.execute("SELECT count(*) AS n, count(*) FILTER (WHERE end_date IS NULL) AS open "
+                    "FROM employment_episodes")
+        row = cur.fetchone()
+    assert row["n"] == before, "a layoff must not create a second episode"
+    assert row["open"] == 0
+    _reset_daniel()
+
+
+def test_ending_a_job_with_nothing_open_is_a_404(client):
+    _reset_daniel()
+    client.post("/v1/facts", cookies={"sc_session": "sess_daniel"},
+                json={"kind": "employment_end", "payload": {"end_date": "2026-08-01"}})
+    r = client.post("/v1/facts", cookies={"sc_session": "sess_daniel"},
+                    json={"kind": "employment_end", "payload": {"end_date": "2026-08-05"}})
+    assert r.status_code == 404
+    _reset_daniel()
+
+
+@pytest.mark.parametrize("text,verdict", [
+    ("My DSO said my cap-gap work authorization ends September 30.", "superseded"),
+    ("I get a 60 day grace period after my job ends, right?", "current"),
+    ("I was told STEM OPT gives you 120 days of unemployment total.", "never_correct"),
+    ("Someone said I can stay for 25 years automatically.", "no_match"),
+])
+def test_claim_checking_distinguishes_four_outcomes(client, text, verdict):
+    """The useful answer is rarely true or false.
+
+    'That was true until 2025-01-17' is the product. 'never_correct' matters too: 120
+    days appears in no version of the rule, so it is not a stale number, it is a
+    wrong one. And no_match must stay available, because reaching for the nearest
+    rule to avoid saying "I cannot place that" is how you give a confident answer
+    about the wrong deadline.
+    """
+    d = client.post("/v1/claims/check", cookies={"sc_session": "sess_maria"},
+                    json={"text": text}).json()
+    assert d["verdict"] == verdict, d
+    if verdict == "superseded":
+        assert d["superseded_on"] == "2025-01-17"
+        assert d["matched_version"]["effective_from"] < d["governing_version"]["effective_from"]

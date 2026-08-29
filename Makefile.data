@@ -6,7 +6,7 @@ SHELL := /bin/bash
 PG    := postgresql://postgres:$${POSTGRES_PASSWORD:-devonly}@localhost:5432/status_clock
 CH    := clickhouse client --host localhost --password $${CLICKHOUSE_PASSWORD:-devonly}
 
-.PHONY: help deps up down migrate seed ch-ddl ch-user cloud cloud-verify fetch convert load corpus quality replicate reset-evals test itest api verify reset demo
+.PHONY: help deps up down migrate seed reseed ch-ddl ch-user cloud cloud-verify fetch convert load corpus quality replicate reset-evals test itest api verify reset demo
 
 help:
 	@grep -E '^[a-z-]+:.*?##' $(MAKEFILE_LIST) | sed 's/:.*##/\t/' | column -t -s $$'\t'
@@ -25,6 +25,10 @@ migrate:       ## apply Postgres migrations in order
 
 seed:          ## seed rule param shapes and rules
 	@for f in db/seeds/*.sql; do echo "== $$f"; psql "$(PG)" -v ON_ERROR_STOP=1 -f "$$f" || exit 1; done
+
+reseed:        ## reset the demo personas. Run between judges.
+	@psql "$(PG)" -v ON_ERROR_STOP=1 -q -f db/seeds/030_personas.sql
+	@echo "personas reset: Maria employed, Daniel employed, no extra facts"
 
 ch-ddl:        ## apply ClickHouse DDL. ORDER MATTERS: views before data. REVIEW A5.
 	@for f in clickhouse/ddl/0[0-8]*.sql; do echo "== $$f"; $(CH) --multiquery < "$$f" || exit 1; done
