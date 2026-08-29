@@ -85,6 +85,46 @@ times out on a cold machine, restart the container and it will connect.
 127.8M synthetic rows at 3.68 GiB; `make -f Makefile.data reset-evals` rebuilds it
 from the real outbox instead.
 
+## ClickHouse Cloud
+
+The corpus also lives on a ClickHouse Cloud service, and the app runs against either
+with no code change.
+
+```bash
+cp infra/.env.cloud.example infra/.env.cloud    # fill host + password from Connect
+make -f Makefile.data cloud                     # schema + 1.4M real rows, ~30s
+make -f Makefile.data cloud-verify              # the product's own query, against Cloud
+```
+
+Cloud returns the same numbers as local, which is the point of checking:
+
+```
+                       local        cloud
+percentile             59.8         59.8
+n_filings              34,534       34,534
+PERM median            462d         462d
+latency                ~60ms        ~200ms   (TLS, over the internet)
+```
+
+`migrate.py` posts one statement at a time, because Cloud's HTTP endpoint refuses
+multi-statement SQL, and it strips inline comments before splitting: a trailing
+`-- facts only; excludes as_of` inside a CREATE TABLE carries a semicolon and cuts
+the statement in half.
+
+It moves the schema and the **real** corpus. It skips the 127.8M synthetic
+evaluations unless you pass `--with-evaluations`; those exist to benchmark the replay
+query, and the real ones replicate from Postgres in seconds.
+
+**Demo off local.** Cloud is the proof that it is not laptop-only, but a hosted
+service on venue wifi is a risk you do not need while someone is standing over your
+shoulder. To point the app at Cloud anyway:
+
+```bash
+set -a; . infra/.env.cloud; set +a
+CLICKHOUSE_HOST=$CH_CLOUD_HOST CLICKHOUSE_PORT=8443 \
+  CLICKHOUSE_PASSWORD=$CH_CLOUD_PASSWORD make -f Makefile.data api
+```
+
 ## What is real and what is not
 
 Real: 1,396,903 rows of DOL OFLC LCA and PERM disclosure data, and every rule

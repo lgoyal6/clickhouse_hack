@@ -6,7 +6,7 @@ SHELL := /bin/bash
 PG    := postgresql://postgres:$${POSTGRES_PASSWORD:-devonly}@localhost:5432/status_clock
 CH    := clickhouse client --host localhost --password $${CLICKHOUSE_PASSWORD:-devonly}
 
-.PHONY: help deps up down migrate seed ch-ddl ch-user fetch convert load corpus quality replicate reset-evals test itest api verify reset demo
+.PHONY: help deps up down migrate seed ch-ddl ch-user cloud cloud-verify fetch convert load corpus quality replicate reset-evals test itest api verify reset demo
 
 help:
 	@grep -E '^[a-z-]+:.*?##' $(MAKEFILE_LIST) | sed 's/:.*##/\t/' | column -t -s $$'\t'
@@ -59,6 +59,15 @@ corpus:        ## fetch + convert + load two fiscal years, then gate
 	$(MAKE) -f Makefile.data fetch convert load FY=2024
 	$(MAKE) -f Makefile.data fetch convert load FY=2025
 	$(MAKE) -f Makefile.data quality
+
+cloud:         ## push schema + real corpus to ClickHouse Cloud (needs infra/.env.cloud)
+	@set -a; . infra/.env.cloud; set +a; python clickhouse/cloud/migrate.py
+
+cloud-verify:  ## run the product's own corpus query against Cloud, not against local
+	@set -a; . infra/.env.cloud; set +a; \
+	  CLICKHOUSE_HOST=$$CH_CLOUD_HOST CLICKHOUSE_PORT=8443 CLICKHOUSE_USER=default \
+	  CLICKHOUSE_PASSWORD=$$CH_CLOUD_PASSWORD \
+	  python -c "$$CLOUD_VERIFY_PY"
 
 replicate:     ## drain the Postgres outbox into ClickHouse (the CDC path)
 	python -m api.replicate
@@ -120,3 +129,16 @@ for sess in ("sess_maria", "sess_daniel"):
         print("        %s | eff. %s | verified=%s" % (p["citation"], p["effective_from"], p["verified"]))
 endef
 export DEMO_PY
+
+define CLOUD_VERIFY_PY
+import sys; sys.path.insert(0, ".")
+from api import clickhouse as ch
+from api.main import PERCENTILE_SQL, PERM_SQL, _sql
+p = {"soc":"15-1252","state":"CA","wage":188000,"fy":2025}
+r, ms = ch.query(_sql(PERCENTILE_SQL), p)
+print("  %s CA $188,000 FY2025" % r[0]["soc_title"])
+print("    percentile %s of n=%s  (%sms over TLS)" % (r[0]["percentile"], format(r[0]["n_filings"], ","), ms))
+pm, _ = ch.query(_sql(PERM_SQL))
+print("    PERM median %sd over %s filings" % (pm[0]["median_days"], format(pm[0]["n"], ",")))
+endef
+export CLOUD_VERIFY_PY
