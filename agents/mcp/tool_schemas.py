@@ -61,7 +61,20 @@ TOOLS = [
                     "type": "array",
                     "items": {
                         "type": "object",
-                        "required": ["clock_key", "label", "severity", "provenance"],
+                        # provenance is required only for a RUNNING clock. A clock
+                        # that has not started has no governing rule to cite, and
+                        # requiring one anyway made the agent refuse an entire, valid
+                        # response: it saw a non-applicable entry with no citation,
+                        # correctly concluded it could not vouch for the payload, and
+                        # reported a data-integrity error instead of the clocks. The
+                        # contract was right and the schema was too strict.
+                        # Mirrors contracts/clock.schema.json.
+                        "required": ["clock_key", "label", "severity"],
+                        "allOf": [{
+                            "if": {"properties": {"applicable": {"const": True}},
+                                   "required": ["applicable"]},
+                            "then": {"required": ["provenance"]},
+                        }],
                         "properties": {
                             "clock_key": {"type": "string"},
                             "label": {"type": "string"},

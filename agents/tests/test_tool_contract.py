@@ -80,3 +80,34 @@ def test_record_fact_forces_a_confidence_choice():
 def test_every_tool_has_a_route():
     from agents.mcp.status_clock import ROUTES
     assert {t["name"] for t in TOOLS} == set(ROUTES)
+
+
+def test_provenance_is_required_only_for_running_clocks():
+    """Regression: the agent refused a valid response because of this.
+
+    Requiring provenance on EVERY clock meant a non-applicable entry, which has no
+    governing rule to cite, failed validation. The agent saw a data-integrity error,
+    correctly declined to vouch for the payload, and reported no clocks at all. The
+    contract was right; the schema was too strict.
+    """
+    from jsonschema import Draft202012Validator
+
+    tool = next(t for t in TOOLS if t["name"] == "get_my_clocks")
+    item = tool["outputSchema"]["properties"]["clocks"]["items"]
+    v = Draft202012Validator(item)
+
+    running = {"clock_key": "opt_unemployment", "label": "Unemployment days",
+               "severity": "critical", "applicable": True,
+               "provenance": {"rule_id": "r", "rule_key": "k", "citation": "8 CFR",
+                              "authority": "8 CFR", "effective_from": "2008-04-08",
+                              "source_url": "https://x.invalid", "verified": False}}
+    assert not list(v.iter_errors(running))
+
+    not_running = {"clock_key": "ac21_365", "label": "AC21 365-day threshold",
+                   "severity": "info", "applicable": False,
+                   "not_applicable_reason": "Not in H-1B status"}
+    assert not list(v.iter_errors(not_running)), "a clock that has not started needs no citation"
+
+    uncited = {"clock_key": "opt_unemployment", "label": "Unemployment days",
+               "severity": "critical", "applicable": True}
+    assert list(v.iter_errors(uncited)), "a RUNNING clock with no provenance must still fail"
