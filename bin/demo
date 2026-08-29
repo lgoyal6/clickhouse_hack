@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# Demo control. Run this between judges.
+#
+#   bin/demo status     what state everything is in
+#   bin/demo reset      back to the starting state, ready for the next judge
+#   bin/demo arm        reset AND remove cap-gap, so the document upload has work to do
+#   bin/demo warm       send one request through every path so nothing is cold
+#
+# Why this exists: after one judge plays with it, Daniel has been laid off, Maria has
+# whatever they recorded, and the chat sidebar is full of the previous conversation.
+# Judge two should not have to be told to ignore any of that.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+PG="postgresql://postgres:devonly@postgres:5432/status_clock"
+pg()  { docker compose -f infra/data.compose.yml exec -T postgres psql "$PG" -q "$@"; }
+pgq() { docker compose -f infra/data.compose.yml exec -T postgres psql "$PG" -tAc "$1"; }
+mongo() { docker compose -f librechat/chat.compose.yml exec -T mongodb mongosh LibreChat --quiet --eval "$1"; }
+
+reset_data() {
+  pg -f - < db/seeds/030_personas.sql >/dev/null
+  echo "  personas reset          Maria on STEM OPT in cap-gap, Daniel employed on H-1B"
+}
+
+clear_chats() {
+  # The agent and the account survive; only the conversation history goes.
+  mongo 'db.conversations.deleteMany({}); db.messages.deleteMany({}); print("")' >/dev/null 2>&1 || true
+  echo "  chat history cleared    the sidebar is empty for the next judge"
+}
+
+arm_upload() {
+  pg -c "DELETE FROM status_periods WHERE status_type='CAP_GAP';" >/dev/null
+  echo "  cap-gap removed         the document upload now has something to do"
+}
+
+status() {
+  printf "  %-22s %s\n" "API"        "$(curl -sS -m 5 -o /dev/null -w '%{http_code}' localhost:8000/healthz || echo DOWN)"
+  printf "  %-22s %s\n" "LibreChat"  "$(curl -sS -m 8 -o /dev/null -w '%{http_code}' localhost:3080/ || echo DOWN)"
+  printf "  %-22s %s\n" "MCP tools"  "$(docker compose -f librechat/chat.compose.yml logs librechat 2>/dev/null | grep -oE 'and [0-9]+ tools' | tail -1)"
+  printf "  %-22s %s\n" "open jobs"  "$(pgq 'SELECT count(*) FROM employment_episodes WHERE end_date IS NULL')"
+  printf "  %-22s %s\n" "cap-gap on file" "$(pgq "SELECT count(*) FROM status_periods WHERE status_type='CAP_GAP'")"
+  printf "  %-22s %s\n" "conversations" "$(mongo 'print(db.conversations.countDocuments())' | tr -d '\r')"
+  printf "  %-22s %s\n" "corpus rows" "$(docker compose -f infra/data.compose.yml exec -T clickhouse clickhouse-client --password devonly -q 'SELECT count() FROM lca_filings' 2>/dev/null)"
+}
+
+warm() {
+  # First call after a restart pays for connection setup and, in LibreChat's case, an
+  # MCP handshake. Pay it now rather than while someone is watching.
+  for s in sess_maria sess_daniel; do
+    curl -sS -m 30 -b "sc_session=$s" "localhost:8000/v1/clocks?as_of=2026-08-28" >/dev/null
+  done
+  curl -sS -m 40 "localhost:8000/v1/corpus/wage-percentile?soc_code=15-1252&state=CA&wage=188000&fiscal_year=2025" >/dev/null
+  curl -sS -m 30 -b "sc_session=sess_daniel" "localhost:8000/v1/standing?fiscal_year=2025" >/dev/null
+  curl -sS -m 20 -X POST localhost:8000/v1/claims/check -H 'content-type: application/json' \
+    -d '{"text":"cap-gap ends September 30"}' >/dev/null
+  echo "  warmed                  clocks, corpus, standing and claim-check all primed"
+  echo
+  echo "  Still send ONE message in LibreChat yourself. The first agent response after"
+  echo "  a restart is slow while the MCP server warms, and you do not want that pause"
+  echo "  happening live."
+}
+
+case "${1:-status}" in
+  status) status ;;
+  reset)  reset_data; clear_chats; status ;;
+  arm)    reset_data; clear_chats; arm_upload; status ;;
+  warm)   warm ;;
+  *) echo "usage: bin/demo [status|reset|arm|warm]"; exit 1 ;;
+esac
