@@ -293,3 +293,49 @@ def end_employment(conn, end_date, employer_name: str | None = None) -> dict | N
             (end_date, employer_name, employer_name),
         )
         return cur.fetchone()
+
+
+def record_h1b_petition(conn, receipt_date) -> dict:
+    """Record a pending cap-subject H-1B petition, and open the cap-gap it creates.
+
+    There was no way to express this, which is a hole in the middle of the product's
+    own story: cap-gap exists BECAUSE a petition is pending, and the demo persona has
+    a cap-gap period only because it was seeded by hand. Someone uploading a receipt
+    notice had nowhere to put it.
+
+    Cap-gap runs from the day after the OPT authorization ends. Its end date is left
+    NULL deliberately: the cap_gap_end rule decides that, and hard-coding a date here
+    would put a number in the database that no citation governs.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT id::text, status_type, ead_expiry FROM status_periods
+            WHERE status_type IN ('OPT','STEM_OPT') AND ead_expiry IS NOT NULL
+            ORDER BY ead_expiry DESC LIMIT 1
+            """
+        )
+        opt = cur.fetchone()
+        if opt is None:
+            raise LookupError(
+                "No OPT period with an EAD end date on file. Add the OPT "
+                "authorization first; cap-gap extends it and cannot exist without it.")
+
+        cur.execute(
+            """
+            INSERT INTO status_periods
+              (user_id, status_type, layer, start_date, confidence)
+            VALUES (current_subject(), 'CAP_GAP', 'authorization',
+                    %s::date + 1, 'document_verified')
+            ON CONFLICT DO NOTHING
+            RETURNING id::text, status_type, layer, start_date
+            """,
+            (opt["ead_expiry"],),
+        )
+        created = cur.fetchone()
+
+    return {
+        "receipt_date": str(receipt_date),
+        "cap_gap": created,
+        "extends": {"status_type": opt["status_type"], "ead_expiry": str(opt["ead_expiry"])},
+    }

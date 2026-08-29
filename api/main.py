@@ -471,9 +471,41 @@ def record_fact(body: dict, response: Response, sc_session: str | None = Cookie(
             "next": "Call get_my_clocks again; the countdowns have been recomputed.",
         }
 
+    # A pending cap-subject petition is what CREATES cap-gap. Without this, someone
+    # uploading a receipt notice has nowhere to put it, and the cap-gap period only
+    # exists because it was seeded by hand.
+    if kind == "h1b_petition":
+        if not payload_early.get("receipt_date"):
+            raise HTTPException(422, detail="receipt_date is required")
+        try:
+            with repo.subject_tx(subject_id) as conn:
+                out = repo.record_h1b_petition(conn, payload_early["receipt_date"])
+        except LookupError as exc:
+            raise HTTPException(409, detail=str(exc)) from None
+        return {
+            "id": (out["cap_gap"] or {}).get("id"),
+            "kind": kind,
+            "written": out,
+            "needs_confirmation": False,
+            "next": ("Call get_my_clocks again. Cap-gap now runs, and its end date "
+                     "comes from the governing cap_gap_end rule rather than from "
+                     "anything in the document."),
+        }
+
     if kind not in repo.WRITABLE:
-        raise HTTPException(
-            422, detail=f"kind must be employment_end or one of {sorted(repo.WRITABLE)}")
+        # Say what IS accepted and what each needs. A bare 422 leaves the model
+        # guessing, and it will reshape the payload and retry rather than tell the
+        # user the shape is wrong.
+        raise HTTPException(422, detail={
+            "message": f"unknown kind {kind!r}",
+            "accepted": {
+                "h1b_petition": ["receipt_date"],
+                "employment_end": ["end_date", "employer_name (optional)"],
+                "status_period": list(repo.WRITABLE["status_period"]),
+                "employment_episode": list(repo.WRITABLE["employment_episode"]),
+                "gc_milestone": list(repo.WRITABLE["gc_milestone"]),
+            },
+        })
 
     payload = body.get("payload") or {}
     confidence = body.get("confidence", "inferred")

@@ -470,3 +470,61 @@ def test_claim_checking_distinguishes_four_outcomes(client, text, verdict):
     if verdict == "superseded":
         assert d["superseded_on"] == "2025-01-17"
         assert d["matched_version"]["effective_from"] < d["governing_version"]["effective_from"]
+
+
+def test_recording_a_petition_creates_the_cap_gap_it_causes(client):
+    """The hole this closed sat in the middle of the product's own story.
+
+    Cap-gap exists BECAUSE a cap-subject petition is pending. There was no fact kind
+    for that petition, so the demo persona had a cap-gap period only because it was
+    seeded by hand, and anyone uploading a receipt notice had nowhere to put it. The
+    agent hit 422 on every shape it tried and concluded, plausibly and wrongly, that
+    the system was refusing the data on purpose.
+    """
+    with repo.subject_tx(MARIA) as conn, conn.cursor() as cur:
+        cur.execute("DELETE FROM status_periods WHERE status_type = 'CAP_GAP'")
+
+    before = {c["clock_key"]: c for c in clocks(client, "sess_maria")["clocks"]}
+    assert before["cap_gap_window"]["applicable"] is False
+    assert before["cap_gap_window"]["not_applicable_code"] == "no_cap_gap"
+
+    r = client.post("/v1/facts", cookies={"sc_session": "sess_maria"},
+                    json={"kind": "h1b_petition",
+                          "payload": {"receipt_date": "2026-04-02"}})
+    assert r.status_code == 201, r.text
+    written = r.json()["written"]
+    # Cap-gap starts the day after the OPT authorization ends, and its END date comes
+    # from the rule, never from the document.
+    assert written["cap_gap"]["start_date"] == "2026-08-01"
+    assert written["extends"]["ead_expiry"] == "2026-07-31"
+
+    after = {c["clock_key"]: c for c in clocks(client, "sess_maria")["clocks"]}
+    cap = after["cap_gap_window"]
+    assert cap["applicable"] is True
+    assert cap["window_end"] == "2027-04-01"
+    assert cap["superseded"]["delta_days"] == 183
+    assert cap["provenance"]["citation"] == "H-1B Modernization Final Rule"
+
+
+def test_a_petition_without_an_opt_period_is_refused_with_a_reason(client):
+    """Cap-gap extends OPT. It cannot exist without it, and the error says so."""
+    r = client.post("/v1/facts", cookies={"sc_session": "sess_daniel"},
+                    json={"kind": "h1b_petition",
+                          "payload": {"receipt_date": "2026-04-02"}})
+    assert r.status_code == 409
+    assert "OPT" in r.json()["detail"]
+
+
+def test_an_unknown_fact_kind_says_what_is_accepted(client):
+    """A bare 422 makes the model reshape the payload and retry instead of speaking up.
+
+    It did exactly that: tried document, then status_period, then employment_episode,
+    then told the user the system was rejecting fictional data. The error now carries
+    the accepted kinds and their required fields.
+    """
+    r = client.post("/v1/facts", cookies={"sc_session": "sess_maria"},
+                    json={"kind": "document", "payload": {}})
+    assert r.status_code == 422
+    detail = r.json()["detail"]
+    assert "h1b_petition" in detail["accepted"]
+    assert detail["accepted"]["h1b_petition"] == ["receipt_date"]

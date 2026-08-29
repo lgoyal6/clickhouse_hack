@@ -231,13 +231,17 @@ TOOLS = [
             "properties": {
                 "kind": {
                     "type": "string",
-                    "enum": ["employment_end", "status_period", "employment_episode",
-                             "gc_milestone", "document"],
+                    "enum": ["h1b_petition", "employment_end", "status_period",
+                             "employment_episode", "gc_milestone"],
                     "description": (
-                        "Use employment_end when a job ENDED: it closes the open "
-                        "episode rather than adding a second one. Adding a closed "
-                        "episode leaves the original open, the person still reads as "
-                        "employed, and the grace period never starts."
+                        "h1b_petition: a pending cap-subject H-1B petition. Needs "
+                        "receipt_date. This is what CREATES cap-gap, so record it "
+                        "when you see a receipt notice. "
+                        "employment_end: a job ENDED. Needs end_date. It closes the "
+                        "open episode rather than adding a second one; adding a "
+                        "closed episode leaves the original open, the person still "
+                        "reads as employed, and the grace period never starts. "
+                        "The others insert a new record."
                     ),
                 },
                 "payload": {"type": "object"},
