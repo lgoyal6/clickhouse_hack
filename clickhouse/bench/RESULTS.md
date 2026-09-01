@@ -90,6 +90,113 @@ entire corpus. It is the shape of "show me the day everyone's risk moved."
 
 ---
 
+## The index decision, and the one that did not work
+
+`clickhouse/queries/replay_diff.sql` has said "run `EXPLAIN indexes = 1`" since
+it was written, and nothing above did. Rows read is the outcome; the plan is
+the reason, and without it the ordering argument is a preference with a number
+next to it.
+
+Four arms over the same 127.75M rows, same query (one clock, one scenario, one
+day), everything merged to steady state first. `clickhouse/bench/index_arms.sh`
+reproduces it, `index_arms.sql` builds the comparison table.
+
+| arm | index available | rows read | bytes read | time |
+|---|---|---|---|---|
+| C | nothing | 127,800,336 | 1.19 GiB | 282 ms |
+| B | minmax skip index on `as_of` | 127,800,336 | 1.19 GiB | 270 ms |
+| A | `PARTITION BY toYYYYMM(as_of)` | 9,850,336 | 94 MiB | 22 ms |
+| A+ | partition + the `by_clock` projection | 55,264 | 540 KiB | 8 ms |
+
+**B is the point of the table.** A minmax index on `as_of` is the obvious
+alternative to partitioning, it reads every one of the 127.8M rows, and it is
+not faster. The plan says why in one line:
+
+```
+Skip
+  Name: as_of_mm
+  Description: minmax GRANULARITY 1
+  Parts: 1/1
+  Granules: 15610/15610
+```
+
+Nothing pruned. A min/max index can only skip a granule whose values are
+*bounded*, and `ORDER BY (user_id, clock_key, scenario_id, as_of)` puts a
+random UUID first, so every granule holds an almost full year of `as_of` and
+no granule can be excluded. The index is not broken; it is being asked about a
+column the data is not clustered by.
+
+A partition key works on the same column because it does not depend on
+clustering at all: it physically separates the rows into 13 monthly parts
+before any ordering question arises.
+
+```
+Min-Max     Parts: 1/13   Granules: 1207/15640
+Partition   Parts: 1/1    Granules: 1207/1207
+PrimaryKey  Parts: 1/1    Granules: 1207/1207   Search Algorithm: generic exclusion search
+```
+
+Read the third line. **On the base table the primary key prunes nothing.** All
+13x of arm A comes from the partition key, and the ordering contributes zero
+to this query, because `user_id` leads it and the query does not filter on
+`user_id`. "generic exclusion search" rather than "binary search" is
+ClickHouse saying exactly that.
+
+The projection is what makes the ordering pay:
+
+```
+ReadFromMergeTree (by_clock)   PrimaryKey   Granules: 7/1210   binary search
+```
+
+### What the projection costs
+
+| | on disk | parts |
+|---|---|---|
+| base table, partitioned | 266 MiB | 13 |
+| the same rows, unpartitioned (`ce_skipidx`) | 187 MiB | 1 |
+| `by_clock` projection | **3.16 GiB** | 13 |
+
+A projection is not an index. It is a second copy of the table sorted
+differently, and re-sorting decides what compresses. Per column:
+
+| column | base | inside `by_clock` |
+|---|---|---|
+| `inputs_hash` | 25.55 MiB | **1.92 GiB** |
+| `user_id` | 13.08 MiB | 488.58 MiB |
+| `days_consumed` | 78.67 MiB | 353.75 MiB |
+| `rule_id` | 32.41 MiB | 8.40 MiB |
+
+`inputs_hash` and `user_id` are constant per user, so ordering by `user_id`
+puts identical values next to each other and they nearly vanish. Ordering by
+`clock_key` interleaves them across all 50,000 users and they become
+incompressible. `rule_id` moves the other way, because it correlates with
+`clock_key`.
+
+So the honest statement of the ordering argument is: the projection buys 178x
+fewer rows on the population query and costs roughly twelve times the base
+table on disk. At this size that is 3 GiB and obviously worth it. It is worth
+knowing which way it scales before it is 300.
+
+**And the partition key is not free either:** 266 MiB across 13 parts against
+187 MiB in one, about 43% more, because thirteen smaller parts compress worse
+than one large one.
+
+### A methodology note that changed a number
+
+Both tables are merged with `OPTIMIZE ... FINAL` before anything is read.
+Before merging, arm A read 987,694 rows; after merging it reads 9,850,336. The
+day being queried happened to sit in two small parts, and since the primary
+key cannot prune inside a part, a bigger part means more of the month gets
+scanned. The pre-merge figure was an artifact of insert order. The post-merge
+one is what the table costs.
+
+The first run of the arms also reported B at 506 ms against C at 1,228 ms,
+which looked like the skip index helping. Re-running in the opposite order put
+them at 270 ms and 282 ms. Rows read was identical in both runs, which is why
+rows read is the number this file leads with.
+
+---
+
 ## Postgres, same queries, one tenth the scale
 
 12,780,000 rows, indexed on `(clock_key, scenario_id, as_of)`, `ANALYZE`d.
