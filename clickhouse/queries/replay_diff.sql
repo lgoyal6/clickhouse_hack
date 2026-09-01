@@ -39,10 +39,19 @@ INNER JOIN (
 WHERE s.days_remaining < a.days_remaining
 ORDER BY days_lost DESC;
 
--- Put the measured cost of this on the architecture slide, not the word "seconds":
+-- DONE, Sep 1 2026. clickhouse/bench/index_arms.sh runs this four ways and
+-- clickhouse/bench/RESULTS.md carries the plans. The short version, because it
+-- is not what the ordering argument assumed:
 --
---   SELECT count() FROM clock_evaluations;
---   EXPLAIN indexes = 1 SELECT ... (the query above)
+--   * On the base table the PRIMARY KEY PRUNES NOTHING for this query. It
+--     reads 1207 of 1207 granules under "generic exclusion search", because
+--     user_id leads the ORDER BY and this query does not filter on user_id.
+--   * All of the base table's pruning comes from PARTITION BY toYYYYMM(as_of):
+--     1 part of 13, 1207 granules of 15640.
+--   * The by_clock projection is what makes the ordering pay: 7 granules of
+--     1210, by binary search. It costs about 12x the base table on disk.
+--   * A minmax skip index on as_of, the obvious alternative to partitioning,
+--     prunes ZERO granules, because every granule spans nearly a full year of
+--     as_of under this ordering.
 --
--- and run it twice, once forcing the by_clock projection and once without, so you
--- can say which access path it takes and why. See docs/REVIEW.md B1.
+-- See docs/REVIEW.md B1.

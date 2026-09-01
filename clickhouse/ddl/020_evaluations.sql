@@ -32,7 +32,25 @@ ORDER BY (user_id, clock_key, scenario_id, as_of);
 
 -- The population query filters on clock_key across every user, so the primary
 -- index above cannot help it. Rather than choosing one ordering, keep both and
--- benchmark them. The timings belong on the architecture slide. See REVIEW B1.
+-- benchmark them. See REVIEW B1.
+--
+-- BENCHMARKED Sep 1 2026, clickhouse/bench/index_arms.sh, and the result is
+-- sharper than "keep both":
+--
+--   PARTITION BY does all of the base table's pruning. The primary key above
+--   reads 1207 of 1207 granules for the marquee query, under generic exclusion
+--   search, because user_id leads it. Partitioning is what turns 127.8M rows
+--   into 9.85M, and it costs about 43% more on disk because 13 monthly parts
+--   compress worse than one.
+--
+--   The projection below is what makes the second ordering pay: 7 granules of
+--   1210, by binary search, 55k rows read. It costs 3.16 GiB against the base
+--   table's 266 MiB, almost all of it in inputs_hash and user_id, which are
+--   constant per user and become incompressible once the rows are interleaved
+--   by clock_key. A projection is a second copy of the table, not an index.
+--
+--   A minmax skip index on as_of instead of a partition key prunes nothing at
+--   all. Same reason: nothing is clustered by as_of here.
 ALTER TABLE clock_evaluations ADD PROJECTION IF NOT EXISTS by_clock (
   SELECT * ORDER BY (clock_key, scenario_id, as_of, user_id)
 );
